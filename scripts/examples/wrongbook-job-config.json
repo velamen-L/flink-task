@@ -1,0 +1,179 @@
+{
+  "domain": "wrongbook",
+  "job_name": "错题本数据处理作业",
+  "description": "处理学习机错题本事件，关联学科、章节等维度数据，生成错题宽表，支持动态路由和热部署",
+  
+  "source_table": {
+    "name": "wrongbook_event_source",
+    "fields": [
+      {"name": "domain", "type": "STRING", "comment": "业务域"},
+      {"name": "type", "type": "STRING", "comment": "事件类型"},
+      {"name": "timestamp", "type": "BIGINT", "comment": "事件时间戳"},
+      {"name": "eventId", "type": "STRING", "comment": "事件ID"},
+      {"name": "payload", "type": "STRING", "comment": "载荷数据"},
+      {"name": "version", "type": "STRING", "comment": "数据版本"},
+      {"name": "source", "type": "STRING", "comment": "来源系统"}
+    ]
+  },
+  
+  "dim_tables": [
+    {
+      "name": "question_dim",
+      "alias": "q",
+      "key_field": "question_id",
+      "join_field": "questionId",
+      "fields": [
+        {"name": "question_id", "type": "STRING", "comment": "题目ID"},
+        {"name": "subject_id", "type": "STRING", "comment": "学科ID"},
+        {"name": "subject_name", "type": "STRING", "comment": "学科名称"},
+        {"name": "chapter_id", "type": "STRING", "comment": "章节ID"},
+        {"name": "chapter_name", "type": "STRING", "comment": "章节名称"},
+        {"name": "knowledge_point", "type": "STRING", "comment": "知识点"},
+        {"name": "difficulty_level", "type": "INT", "comment": "难度等级"},
+        {"name": "question_type", "type": "STRING", "comment": "题目类型"}
+      ],
+      "output_fields": ["subject_id", "subject_name", "chapter_id", "chapter_name", "knowledge_point", "difficulty_level", "question_type"]
+    },
+    {
+      "name": "user_dim",
+      "alias": "u",
+      "key_field": "user_id",
+      "join_field": "userId",
+      "fields": [
+        {"name": "user_id", "type": "STRING", "comment": "用户ID"},
+        {"name": "user_name", "type": "STRING", "comment": "用户名称"},
+        {"name": "grade", "type": "STRING", "comment": "年级"},
+        {"name": "school", "type": "STRING", "comment": "学校"}
+      ],
+      "output_fields": ["user_name", "grade", "school"]
+    }
+  ],
+  
+  "result_table": {
+    "name": "wrongbook_wide_table",
+    "key_field": "event_id",
+    "fields": [
+      {"name": "event_id", "type": "STRING", "comment": "事件ID"},
+      {"name": "domain", "type": "STRING", "comment": "业务域"},
+      {"name": "type", "type": "STRING", "comment": "事件类型"},
+      {"name": "user_id", "type": "STRING", "comment": "用户ID"},
+      {"name": "user_name", "type": "STRING", "comment": "用户名称"},
+      {"name": "grade", "type": "STRING", "comment": "年级"},
+      {"name": "school", "type": "STRING", "comment": "学校"},
+      {"name": "question_id", "type": "STRING", "comment": "题目ID"},
+      {"name": "subject_id", "type": "STRING", "comment": "学科ID"},
+      {"name": "subject_name", "type": "STRING", "comment": "学科名称"},
+      {"name": "chapter_id", "type": "STRING", "comment": "章节ID"},
+      {"name": "chapter_name", "type": "STRING", "comment": "章节名称"},
+      {"name": "knowledge_point", "type": "STRING", "comment": "知识点"},
+      {"name": "difficulty_level", "type": "INT", "comment": "难度等级"},
+      {"name": "question_type", "type": "STRING", "comment": "题目类型"},
+      {"name": "wrong_times", "type": "INT", "comment": "错误次数"},
+      {"name": "wrong_time", "type": "TIMESTAMP(3)", "comment": "错题时间"},
+      {"name": "fix_time", "type": "TIMESTAMP(3)", "comment": "订正时间"},
+      {"name": "fix_result", "type": "STRING", "comment": "订正结果"},
+      {"name": "business_data", "type": "STRING", "comment": "业务数据"},
+      {"name": "process_time", "type": "TIMESTAMP(3)", "comment": "处理时间"},
+      {"name": "data_source", "type": "STRING", "comment": "数据来源"},
+      {"name": "processor_class", "type": "STRING", "comment": "处理器类名"}
+    ],
+    "select_fields": [
+      "s.eventId as event_id",
+      "s.domain",
+      "s.type",
+      "JSON_VALUE(s.payload, '$.userId') as user_id",
+      "COALESCE(u.user_name, 'Unknown') as user_name",
+      "COALESCE(u.grade, 'Unknown') as grade", 
+      "COALESCE(u.school, 'Unknown') as school",
+      "JSON_VALUE(s.payload, '$.questionId') as question_id",
+      "COALESCE(q.subject_id, 'Unknown') as subject_id",
+      "COALESCE(q.subject_name, 'Unknown') as subject_name",
+      "COALESCE(q.chapter_id, 'Unknown') as chapter_id",
+      "COALESCE(q.chapter_name, 'Unknown') as chapter_name",
+      "COALESCE(q.knowledge_point, 'Unknown') as knowledge_point",
+      "COALESCE(q.difficulty_level, 0) as difficulty_level",
+      "COALESCE(q.question_type, 'Unknown') as question_type",
+      "CAST(JSON_VALUE(s.payload, '$.wrongTimes') AS INT) as wrong_times",
+      "TO_TIMESTAMP_LTZ(CAST(JSON_VALUE(s.payload, '$.wrongTime') AS BIGINT), 3) as wrong_time",
+      "CASE WHEN JSON_VALUE(s.payload, '$.fixTime') IS NOT NULL THEN TO_TIMESTAMP_LTZ(CAST(JSON_VALUE(s.payload, '$.fixTime') AS BIGINT), 3) ELSE NULL END as fix_time",
+      "JSON_VALUE(s.payload, '$.fixResult') as fix_result",
+      "s.payload as business_data",
+      "s.proc_time as process_time",
+      "'realtime' as data_source",
+      "'dynamic' as processor_class"
+    ]
+  },
+  
+  "event_types": ["wrongbook_add", "wrongbook_fix", "wrongbook_delete", "wrongbook_history"],
+  
+  "event_fields": [
+    {"name": "userId", "java_type": "String"},
+    {"name": "questionId", "java_type": "String"},
+    {"name": "wrongTimes", "java_type": "Integer"},
+    {"name": "wrongTime", "java_type": "Long"},
+    {"name": "fixTime", "java_type": "Long"},
+    {"name": "fixResult", "java_type": "String"},
+    {"name": "sessionId", "java_type": "String"}
+  ],
+  
+  "event_processing_fields": {
+    "wrongbook_add": [
+      {"name": "user_id", "source": "userId", "type": "Text"},
+      {"name": "question_id", "source": "questionId", "type": "Text"},
+      {"name": "wrong_times", "source": "wrongTimes", "type": "Int"},
+      {"name": "wrong_time", "source": "wrongTime", "type": "Long"},
+      {"name": "session_id", "source": "sessionId", "type": "Text"}
+    ],
+    "wrongbook_fix": [
+      {"name": "user_id", "source": "userId", "type": "Text"},
+      {"name": "question_id", "source": "questionId", "type": "Text"},
+      {"name": "fix_time", "source": "fixTime", "type": "Long"},
+      {"name": "fix_result", "source": "fixResult", "type": "Text"},
+      {"name": "attempts", "source": "attempts", "type": "Int"},
+      {"name": "time_cost", "source": "timeCost", "type": "Long"}
+    ],
+    "wrongbook_delete": [
+      {"name": "user_id", "source": "userId", "type": "Text"},
+      {"name": "question_id", "source": "questionId", "type": "Text"},
+      {"name": "delete_reason", "source": "deleteReason", "type": "Text"}
+    ]
+  },
+  
+  "business_config": {
+    "batch.size": "100",
+    "checkpoint.interval": "60000",
+    "parallelism": "4",
+    "cache.ttl": "3600",
+    "retry.times": "3"
+  },
+  
+  "routing_configs": [
+    {
+      "event_type": "wrongbook_add",
+      "processor_class": "com.flink.realtime.processor.impl.WrongbookAddProcessor",
+      "output_config": {
+        "sinks": ["wrongbook_wide_table", "alert_topic"]
+      },
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "event_type": "wrongbook_fix",
+      "processor_class": "com.flink.realtime.processor.impl.WrongbookFixProcessor",
+      "output_config": {
+        "sinks": ["wrongbook_wide_table", "metrics_topic"]
+      },
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "event_type": "wrongbook_delete",
+      "processor_class": "com.flink.realtime.processor.impl.WrongbookDeleteProcessor",
+      "output_config": {
+        "sinks": ["wrongbook_wide_table", "audit_topic"]
+      },
+      "priority": 90,
+      "enabled": true
+    }
+  ]
+}
