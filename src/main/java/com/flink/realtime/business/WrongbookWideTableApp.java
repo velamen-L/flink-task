@@ -1,7 +1,5 @@
-package com.flink.realtime.app;
+package com.flink.realtime.business;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flink.realtime.bean.BusinessEvent;
 import com.flink.realtime.bean.ProcessedEvent;
 import com.flink.realtime.config.RoutingConfig;
@@ -9,7 +7,6 @@ import com.flink.realtime.common.AliyunFlinkUtils;
 import com.flink.realtime.function.BusinessEventDeserializationSchema;
 import com.flink.realtime.function.DynamicRoutingProcessFunction;
 import com.flink.realtime.function.OutputRoutingProcessFunction;
-import com.flink.realtime.sink.AliyunKafkaProducer;
 import com.flink.realtime.sink.AliyunMySQLSinkFunction;
 import com.flink.realtime.source.AliyunKafkaSourceBuilder;
 import com.flink.realtime.source.DynamicRoutingConfigSource;
@@ -26,39 +23,36 @@ import org.apache.flink.util.OutputTag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.Timestamp;
-
 /**
- * 动态路由Flink应用
- * 支持热配置更新的混合架构实现
+ * 错题本实时宽表 - AI生成
+ * 业务域: wrongbook
+ * 生成时间: 2025-08-18 19:55:48
  * 
- * @author yangfanlin
- * @date 2025-01-17
+ * 支持的事件类型:
+ * - wrongbook_add: 错题添加事件
+ * - wrongbook_fix: 错题订正事件
+ * - wrongbook_delete: 错题删除事件
+ * 
+ * @author AI代码生成器
  */
-public class DynamicRoutingFlinkApp {
+public class WrongbookWideTableApp {
     
-    private static final Logger logger = LoggerFactory.getLogger(DynamicRoutingFlinkApp.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final Logger logger = LoggerFactory.getLogger(WrongbookWideTableApp.class);
     
     public static void main(String[] args) throws Exception {
         
-        if (args.length < 1) {
-            logger.error("请提供业务域参数，例如：java -jar app.jar wrongbook");
-            System.exit(1);
-        }
+        String domain = "wrongbook";
+        logger.info("启动{}宽表作业，业务域: {}", "错题本实时宽表", domain);
         
-        String domain = args[0];
-        logger.info("启动动态路由Flink作业，业务域: {}", domain);
-        
-        // 1. 创建阿里云优化的执行环境
+        // 1. 创建执行环境
         StreamExecutionEnvironment env = AliyunFlinkUtils.getAliyunStreamExecutionEnvironment(
-                ConfigUtils.getInt("flink.parallelism", 4));
+                ConfigUtils.getInt("flink.parallelism", 2));
         
         // 2. 创建事件源
         KafkaSource<BusinessEvent> eventSource = AliyunKafkaSourceBuilder.buildAliyunKafkaSource(
                 ConfigUtils.getString("kafka.bootstrap.servers"),
                 domain + "-events",
-                domain + "-processor-group",
+                domain + "-wide-table-group",
                 ConfigUtils.getString("kafka.username", null),
                 ConfigUtils.getString("kafka.password", null)
         );
@@ -91,80 +85,36 @@ public class DynamicRoutingFlinkApp {
                 TypeInformation.of(ProcessedEvent.class));
         OutputTag<ProcessedEvent> metricsTag = new OutputTag<ProcessedEvent>("metrics", 
                 TypeInformation.of(ProcessedEvent.class));
-        OutputTag<ProcessedEvent> auditTag = new OutputTag<ProcessedEvent>("audit", 
-                TypeInformation.of(ProcessedEvent.class));
         
         SingleOutputStreamOperator<ProcessedEvent> routedStream = processedStream
-                .process(new OutputRoutingProcessFunction(alertTag, metricsTag, auditTag))
+                .process(new OutputRoutingProcessFunction(alertTag, metricsTag, null))
                 .name("Output Routing")
                 .uid("output-routing-" + domain);
         
-        // 6. 输出到不同目标
-        
-        // 主流：写入宽表
+        // 6. 输出到宽表
         routedStream.addSink(new AliyunMySQLSinkFunction<>(
-                getWideTableInsertSQL(domain),
-                getWideTableParameterSetter(domain),
-                100 // 批大小
-        )).name(domain + " Wide Table Sink");
-        
-        // 侧流：告警数据
-        routedStream.getSideOutput(alertTag)
-                .addSink(new AliyunKafkaProducer<>("alert-topic"))
-                .name("Alert Sink");
-        
-        // 侧流：指标数据
-        routedStream.getSideOutput(metricsTag)
-                .addSink(new AliyunKafkaProducer<>("metrics-topic"))
-                .name("Metrics Sink");
-        
-        // 侧流：审计数据
-        routedStream.getSideOutput(auditTag)
-                .addSink(new AliyunKafkaProducer<>("audit-topic"))
-                .name("Audit Sink");
+                getInsertSQL(),
+                getParameterSetter(),
+                100
+        )).name("wrongbook宽表输出");
         
         // 7. 执行作业
-        env.execute(domain + " Dynamic Routing Job");
+        env.execute("错题本实时宽表 Dynamic Job");
     }
     
-    /**
-     * 获取宽表插入SQL
-     */
-    private static String getWideTableInsertSQL(String domain) {
-        return String.format(
-                "INSERT INTO %s_wide_table (event_id, domain, type, user_id, business_data, " +
-                "process_time, data_source, processor_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", domain);
+    private static String getInsertSQL() {
+        return "INSERT INTO dwd_wrong_record_wide_delta " +
+               "(id, event_id, event_type, user_id, question_id, process_time) " +
+               "VALUES (?, ?, ?, ?, ?, ?)";
     }
     
-    /**
-     * 获取宽表参数设置器
-     */
-    private static AliyunMySQLSinkFunction.SqlParameterSetter<ProcessedEvent> getWideTableParameterSetter(String domain) {
+    private static AliyunMySQLSinkFunction.SqlParameterSetter<ProcessedEvent> getParameterSetter() {
         return (ps, event) -> {
-            ps.setString(1, event.getOriginalEvent().getEventId());
-            ps.setString(2, event.getOriginalEvent().getDomain());
+            ps.setLong(1, event.getOriginalEvent().getEventId().hashCode());
+            ps.setString(2, event.getOriginalEvent().getEventId());
             ps.setString(3, event.getOriginalEvent().getType());
-            // 从payload中提取用户ID
-            ps.setString(4, extractUserId(event.getOriginalEvent()));
-            ps.setString(5, objectMapper.writeValueAsString(event.getProcessedData()));
-            ps.setTimestamp(6, new Timestamp(event.getProcessTime()));
-            ps.setString(7, "realtime");
-            ps.setString(8, event.getProcessorClass());
+            // 根据具体业务添加字段映射
+            ps.setTimestamp(6, new java.sql.Timestamp(event.getProcessTime()));
         };
-    }
-    
-    /**
-     * 从事件中提取用户ID
-     */
-    private static String extractUserId(BusinessEvent event) {
-        try {
-            JsonNode payload = event.getPayload();
-            if (payload.has("userId")) {
-                return payload.get("userId").asText();
-            }
-        } catch (Exception e) {
-            // 忽略解析错误
-        }
-        return "unknown";
     }
 }

@@ -1,0 +1,162 @@
+{
+  "domain": "wrongbook",
+  "job_name": "错题本实时宽表",
+  "description": "基于动态路由的错题本实时宽表，支持热部署和新事件类型",
+  
+  "source_table": {
+    "name": "wrongbook_events",
+    "type": "kafka",
+    "topic": "wrongbook-events",
+    "format": "json"
+  },
+  
+  "result_table": {
+    "name": "dwd_wrong_record_wide_delta",
+    "type": "mysql",
+    "database": "dwd",
+    "table": "dwd_wrong_record_wide_delta"
+  },
+  
+  "event_types": [
+    {
+      "type": "wrongbook_add",
+      "description": "错题添加事件",
+      "payload_fields": [
+        {"name": "userId", "type": "String", "required": true, "description": "用户ID"},
+        {"name": "questionId", "type": "String", "required": true, "description": "题目ID"},
+        {"name": "wrongRecordId", "type": "String", "required": false, "description": "错题记录ID"},
+        {"name": "subject", "type": "String", "required": false, "description": "学科代码"},
+        {"name": "subjectName", "type": "String", "required": false, "description": "学科名称"},
+        {"name": "patternId", "type": "String", "required": false, "description": "题目模式ID"},
+        {"name": "chapterId", "type": "String", "required": false, "description": "章节ID"},
+        {"name": "chapterName", "type": "String", "required": false, "description": "章节名称"},
+        {"name": "wrongTime", "type": "Long", "required": false, "description": "错题时间"},
+        {"name": "createTime", "type": "Long", "required": false, "description": "创建时间"}
+      ],
+      "processing_logic": "create_new_record",
+      "output_fields": [
+        "id", "wrong_id", "user_id", "subject", "subject_name", 
+        "question_id", "pattern_id", "collect_time", "event_id", "event_type"
+      ]
+    },
+    {
+      "type": "wrongbook_fix",
+      "description": "错题订正事件", 
+      "payload_fields": [
+        {"name": "userId", "type": "String", "required": true, "description": "用户ID"},
+        {"name": "questionId", "type": "String", "required": true, "description": "题目ID"},
+        {"name": "wrongRecordId", "type": "String", "required": true, "description": "错题记录ID"},
+        {"name": "fixTime", "type": "Long", "required": true, "description": "订正时间"},
+        {"name": "fixResult", "type": "String", "required": true, "description": "订正结果"},
+        {"name": "attempts", "type": "Integer", "required": false, "description": "尝试次数"},
+        {"name": "timeCost", "type": "Long", "required": false, "description": "耗时"},
+        {"name": "subject", "type": "String", "required": false, "description": "学科代码"},
+        {"name": "patternId", "type": "String", "required": false, "description": "题目模式ID"}
+      ],
+      "processing_logic": "update_existing_record",
+      "output_fields": [
+        "fix_id", "fix_time", "fix_result", "fix_result_desc"
+      ]
+    },
+    {
+      "type": "wrongbook_delete",
+      "description": "错题删除事件",
+      "payload_fields": [
+        {"name": "userId", "type": "String", "required": true, "description": "用户ID"},
+        {"name": "questionId", "type": "String", "required": true, "description": "题目ID"},
+        {"name": "wrongRecordId", "type": "String", "required": true, "description": "错题记录ID"},
+        {"name": "deleteReason", "type": "String", "required": false, "description": "删除原因"},
+        {"name": "deleteTime", "type": "Long", "required": true, "description": "删除时间"}
+      ],
+      "processing_logic": "mark_deleted",
+      "output_fields": [
+        "is_deleted", "delete_time", "delete_reason"
+      ],
+      "enabled": false,
+      "comment": "新增事件类型，默认禁用"
+    }
+  ],
+  
+  "dimension_tables": [
+    {
+      "name": "tower_pattern",
+      "type": "mysql",
+      "key_field": "id",
+      "query_sql": "SELECT id, name, type, subject, difficulty, modify_time FROM tower_pattern",
+      "refresh_interval": "30m",
+      "description": "题目模式维表"
+    },
+    {
+      "name": "tower_teaching_type_pt", 
+      "type": "mysql",
+      "key_field": "pt_id",
+      "query_sql": "SELECT id, teaching_type_id, pt_id, order_num, is_delete, modify_time FROM tower_teaching_type_pt WHERE is_delete = 0",
+      "refresh_interval": "30m",
+      "description": "教学类型关联维表"
+    },
+    {
+      "name": "tower_teaching_type",
+      "type": "mysql", 
+      "key_field": "id",
+      "query_sql": "SELECT id, chapter_id, teaching_type_name, is_delete, modify_time FROM tower_teaching_type WHERE is_delete = 0",
+      "refresh_interval": "30m",
+      "description": "教学类型维表"
+    }
+  ],
+  
+  "routing_config": {
+    "enable_dynamic_routing": true,
+    "config_source": "mysql",
+    "config_table": "flink_routing_config",
+    "refresh_interval": "30s",
+    "enable_hot_deployment": true,
+    "enable_version_control": true
+  },
+  
+  "output_config": {
+    "main_sink": {
+      "type": "mysql",
+      "table": "dwd_wrong_record_wide_delta",
+      "batch_size": 100,
+      "enable_upsert": true
+    },
+    "side_outputs": [
+      {
+        "name": "alert",
+        "type": "kafka",
+        "topic": "wrongbook-alerts",
+        "enabled": true
+      },
+      {
+        "name": "metrics", 
+        "type": "kafka",
+        "topic": "wrongbook-metrics",
+        "enabled": true
+      }
+    ]
+  },
+  
+  "flink_config": {
+    "parallelism": 2,
+    "checkpoint_interval": "10s",
+    "state_backend": "rocksdb",
+    "state_ttl": "1d"
+  },
+  
+  "monitoring": {
+    "metrics": [
+      "event_processing_rate",
+      "hot_deployment_success_rate",
+      "new_event_type_adoption_rate", 
+      "processor_performance"
+    ],
+    "alerts": [
+      "hot_deployment_failure",
+      "unknown_event_type",
+      "processor_exception"
+    ]
+  },
+  
+  "generated_time": "2024-12-19T10:00:00Z",
+  "version": "1.0"
+}

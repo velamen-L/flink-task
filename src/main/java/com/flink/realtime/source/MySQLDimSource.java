@@ -26,11 +26,26 @@ public class MySQLDimSource extends RichSourceFunction<Map<String, Object>> {
     private final String querySql;
     private final String keyField;
     private final long refreshInterval;
+    private final String customUrl;
+    private final String customUsername;
+    private final String customPassword;
     
     public MySQLDimSource(String querySql, String keyField, long refreshInterval) {
         this.querySql = querySql;
         this.keyField = keyField;
         this.refreshInterval = refreshInterval;
+        this.customUrl = null;
+        this.customUsername = null;
+        this.customPassword = null;
+    }
+    
+    public MySQLDimSource(String querySql, String keyField, String url, String username, String password, long refreshInterval) {
+        this.querySql = querySql;
+        this.keyField = keyField;
+        this.refreshInterval = refreshInterval;
+        this.customUrl = url;
+        this.customUsername = username;
+        this.customPassword = password;
     }
     
     @Override
@@ -39,12 +54,20 @@ public class MySQLDimSource extends RichSourceFunction<Map<String, Object>> {
         
         // 建立MySQL连接
         Class.forName(ConfigUtils.getString("mysql.driver", "com.mysql.cj.jdbc.Driver"));
-        String url = ConfigUtils.getString("mysql.url");
-        String username = ConfigUtils.getString("mysql.username");
-        String password = ConfigUtils.getString("mysql.password");
+        
+        String url, username, password;
+        if (customUrl != null) {
+            url = customUrl;
+            username = customUsername;
+            password = customPassword;
+        } else {
+            url = ConfigUtils.getString("mysql.url");
+            username = ConfigUtils.getString("mysql.username");
+            password = ConfigUtils.getString("mysql.password");
+        }
         
         connection = DriverManager.getConnection(url, username, password);
-        logger.info("MySQL维表连接建立成功");
+        logger.info("MySQL维表连接建立成功: {}", url);
     }
     
     @Override

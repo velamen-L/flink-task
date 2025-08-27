@@ -95,4 +95,26 @@ public class ConfigUtils {
         String value = properties.getProperty(key);
         return value != null ? Boolean.parseBoolean(value) : defaultValue;
     }
+    
+    /**
+     * 获取长整型配置值
+     * 
+     * @param key 配置键
+     * @return 配置值
+     */
+    public static long getLong(String key) {
+        return Long.parseLong(properties.getProperty(key));
+    }
+    
+    /**
+     * 获取长整型配置值，如果不存在则返回默认值
+     * 
+     * @param key 配置键
+     * @param defaultValue 默认值
+     * @return 配置值
+     */
+    public static long getLong(String key, long defaultValue) {
+        String value = properties.getProperty(key);
+        return value != null ? Long.parseLong(value) : defaultValue;
+    }
 }
