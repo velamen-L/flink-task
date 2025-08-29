@@ -1,0 +1,301 @@
+# 阿里云Flink Catalog配置文件
+# 用于MCP服务连接和查询Catalog
+
+# MCP服务器配置
+mcp:
+  server:
+    name: "aliyun-flink-catalog-service"
+    version: "1.0.0"
+    description: "阿里云Flink Catalog查询服务"
+    log_level: "INFO"
+  
+  # 资源定义
+  resources:
+    - name: "catalog"
+      description: "阿里云Flink Catalog资源"
+      schema:
+        type: "object"
+        properties:
+          database:
+            type: "string"
+            description: "数据库名称"
+          table:
+            type: "string"
+            description: "表名称"
+          catalog_type:
+            type: "string"
+            description: "Catalog类型"
+            enum: ["aliyun_flink", "mysql", "kafka", "oss"]
+  
+  # 工具定义
+  tools:
+    - name: "query_table_schema"
+      description: "查询表结构"
+      inputSchema:
+        type: "object"
+        properties:
+          database:
+            type: "string"
+            description: "数据库名称"
+          table:
+            type: "string"
+            description: "表名称"
+        required: ["database", "table"]
+    
+    - name: "list_databases"
+      description: "列出所有数据库"
+      inputSchema:
+        type: "object"
+        properties: {}
+    
+    - name: "list_tables"
+      description: "列出数据库中的所有表"
+      inputSchema:
+        type: "object"
+        properties:
+          database:
+            type: "string"
+            description: "数据库名称"
+        required: ["database"]
+    
+    - name: "validate_table_schema"
+      description: "验证表结构"
+      inputSchema:
+        type: "object"
+        properties:
+          database:
+            type: "string"
+          table:
+            type: "string"
+          schema:
+            type: "object"
+            description: "表结构定义"
+        required: ["database", "table", "schema"]
+
+# 阿里云Flink配置
+aliyun_flink:
+  # 基础连接配置
+  endpoint: "${ALIYUN_FLINK_ENDPOINT}"
+  region: "${ALIYUN_REGION:-cn-hangzhou}"
+  access_key_id: "${ALIYUN_ACCESS_KEY_ID}"
+  access_key_secret: "${ALIYUN_ACCESS_KEY_SECRET}"
+  
+  # Catalog配置
+  catalog:
+    name: "aliyun_catalog"
+    type: "aliyun_flink"
+    default_database: "default"
+    
+    # 连接配置
+    connection:
+      timeout: 30000
+      retry_count: 3
+      retry_interval: 1000
+    
+    # 元数据配置
+    metadata:
+      cache_enabled: true
+      cache_ttl: 300  # 5分钟
+      cache_max_size: 1000
+      refresh_interval: 60000  # 1分钟
+  
+  # 权限配置
+  permissions:
+    read_only: true
+    allowed_databases: 
+      - "default"
+      - "user_db"
+      - "metrics_db"
+      - "order_db"
+      - "product_db"
+    allowed_operations: 
+      - "DESCRIBE"
+      - "SHOW"
+      - "LIST"
+      - "VALIDATE"
+    denied_operations:
+      - "CREATE"
+      - "DROP"
+      - "ALTER"
+      - "INSERT"
+      - "UPDATE"
+      - "DELETE"
+
+# 数据源配置
+data_sources:
+  # MySQL维表配置
+  mysql:
+    default:
+      url: "${MYSQL_URL:-jdbc:mysql://localhost:3306/flink_metadata}"
+      username: "${MYSQL_USERNAME:-root}"
+      password: "${MYSQL_PASSWORD:-password}"
+      driver: "com.mysql.cj.jdbc.Driver"
+      connection_pool:
+        initial_size: 5
+        max_size: 20
+        min_idle: 5
+        max_lifetime: 1800000
+        connection_timeout: 30000
+    
+    user_db:
+      url: "${USER_DB_URL:-jdbc:mysql://localhost:3306/user_db}"
+      username: "${USER_DB_USERNAME:-root}"
+      password: "${USER_DB_PASSWORD:-password}"
+    
+    metrics_db:
+      url: "${METRICS_DB_URL:-jdbc:mysql://localhost:3306/metrics_db}"
+      username: "${METRICS_DB_USERNAME:-root}"
+      password: "${METRICS_DB_PASSWORD:-password}"
+  
+  # Kafka配置
+  kafka:
+    default:
+      bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+      security_protocol: "${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}"
+      sasl_mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
+      username: "${KAFKA_USERNAME}"
+      password: "${KAFKA_PASSWORD}"
+      group_id: "flink-catalog-service"
+      auto_offset_reset: "latest"
+      enable_auto_commit: false
+  
+  # 阿里云OSS配置
+  oss:
+    endpoint: "${OSS_ENDPOINT}"
+    bucket: "${OSS_BUCKET}"
+    access_key_id: "${OSS_ACCESS_KEY_ID}"
+    access_key_secret: "${OSS_ACCESS_KEY_SECRET}"
+    region: "${OSS_REGION:-cn-hangzhou}"
+
+# 缓存配置
+cache:
+  enabled: true
+  type: "memory"  # memory, redis
+  ttl: 300  # 5分钟
+  max_size: 1000
+  cleanup_interval: 60000  # 1分钟
+  
+  # Redis缓存配置（可选）
+  redis:
+    host: "${REDIS_HOST:-localhost}"
+    port: "${REDIS_PORT:-6379}"
+    password: "${REDIS_PASSWORD}"
+    database: 0
+    timeout: 5000
+
+# 安全配置
+security:
+  # 加密配置
+  encryption:
+    enabled: true
+    algorithm: "AES-256"
+    key_file: "${ENCRYPTION_KEY_FILE:-/etc/mcp/encryption.key}"
+    key_env_var: "MCP_ENCRYPTION_KEY"
+  
+  # 审计配置
+  audit:
+    enabled: true
+    log_file: "${AUDIT_LOG_FILE:-/var/log/mcp/audit.log}"
+    log_level: "INFO"
+    include_sensitive_data: false
+  
+  # 访问控制
+  access_control:
+    enabled: true
+    allowed_ips: []  # 空数组表示允许所有IP
+    rate_limit:
+      enabled: true
+      requests_per_minute: 1000
+      burst_size: 100
+
+# 监控配置
+monitoring:
+  # 指标配置
+  metrics:
+    enabled: true
+    port: 9249
+    path: "/metrics"
+    reporter: "prometheus"
+  
+  # 健康检查
+  health_check:
+    enabled: true
+    port: 8080
+    path: "/health"
+    interval: 30000
+  
+  # 日志配置
+  logging:
+    level: "INFO"
+    format: "json"
+    output: "stdout"
+    file:
+      enabled: false
+      path: "/var/log/mcp/service.log"
+      max_size: "100MB"
+      max_files: 10
+
+# 性能配置
+performance:
+  # 连接池配置
+  connection_pool:
+    max_connections: 50
+    min_connections: 10
+    connection_timeout: 30000
+    idle_timeout: 600000
+  
+  # 查询配置
+  query:
+    timeout: 30000
+    max_rows: 10000
+    fetch_size: 1000
+  
+  # 并发配置
+  concurrency:
+    max_workers: 20
+    queue_size: 1000
+    thread_pool_size: 10
+
+# 错误处理配置
+error_handling:
+  # 重试配置
+  retry:
+    enabled: true
+    max_attempts: 3
+    initial_delay: 1000
+    max_delay: 10000
+    multiplier: 2
+  
+  # 降级配置
+  fallback:
+    enabled: true
+    default_schema: "default"
+    cache_on_error: true
+  
+  # 错误报告
+  reporting:
+    enabled: true
+    log_errors: true
+    send_notifications: false
+    notification_email: "${ERROR_NOTIFICATION_EMAIL}"
+
+# 开发配置
+development:
+  # 调试模式
+  debug:
+    enabled: false
+    log_queries: false
+    log_schemas: false
+  
+  # 测试配置
+  test:
+    mock_catalog: false
+    test_databases: ["test_db"]
+    test_tables: ["test_table"]
+  
+  # 文档配置
+  documentation:
+    auto_generate: true
+    output_format: "markdown"
+    include_examples: true
+    output_path: "/docs/api"
