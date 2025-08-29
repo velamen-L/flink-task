@@ -1,0 +1,89 @@
+# Maven构建输出
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# IDE文件
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+
+# 日志文件
+*.log
+logs/
+log/
+
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# 操作系统生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Flink相关
+flink-conf.yaml
+flink-conf.yaml.bak
+*.pid
+
+# 数据文件
+*.dat
+*.data
+*.csv
+*.json
+*.xml
+*.parquet
+*.orc
+*.avro
+
+# 配置文件（可选，根据需要调整）
+# config/
+# application-*.properties
+# application-*.yml
+
+# 测试输出
+test-output/
+coverage/
+.nyc_output/
+
+# 缓存
+.cache/
+.m2/repository/
+node_modules/
+
+# 其他
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Docker相关
+.dockerignore
+docker-compose.override.yml
+
+# 备份文件
+*.bak
+*.backup
+*.old
