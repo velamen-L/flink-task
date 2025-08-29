@@ -4,6 +4,7 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.MetricGroup;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,8 +56,8 @@ public class AliyunMetricsReporter {
             return getCurrentProcessingLatency();
         });
         
-        // 事件大小分布
-        eventSizeHistogram = businessGroup.histogram("event_size_bytes");
+        // 事件大小分布 - 暂时注释掉，因为需要特定的Histogram实现
+        // eventSizeHistogram = businessGroup.histogram("event_size_bytes");
         
         // 维表查询指标
         MetricGroup dimGroup = metricGroup.addGroup("dimension_table");

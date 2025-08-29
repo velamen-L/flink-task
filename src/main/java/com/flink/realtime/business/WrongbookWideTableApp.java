@@ -69,7 +69,8 @@ public class WrongbookWideTableApp {
                 new DynamicRoutingConfigSource(domain), "Routing Config Source");
         
         MapStateDescriptor<String, RoutingConfig> configDescriptor = 
-                new MapStateDescriptor<>("routing-config", String.class, 
+                new MapStateDescriptor<>("routing-config", 
+                        TypeInformation.of(String.class), 
                         TypeInformation.of(RoutingConfig.class));
         BroadcastStream<RoutingConfig> configBroadcast = configStream.broadcast(configDescriptor);
         
