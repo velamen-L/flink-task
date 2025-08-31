@@ -696,6 +696,36 @@ flink run \
 - 详细的部署步骤指导
 - 运维和监控建议
 
+## 目录结构规范
+```
+topics/{topic_name}/
+├── sql/
+│   └── {topic_name}_wide_table_hybrid.sql     # Flink SQL作业
+├── docs/
+│   ├── DataStream API部署说明.md              # DataStream API部署文档
+│   ├── {topic_name}Payload数据结构说明.md     # Payload文档
+│   └── {topic_name}Flink SQL作业配置说明.md   # SQL作业文档
+└── java/                                      # Java源码（已移至src目录）
+```
+
+## Java包结构规范
+```
+com.flink.realtime.topics.{topic_name}
+├── app
+│   └── {TopicName}WideTableApp.java          # 主应用类
+├── bean
+│   └── {TopicName}Payload.java               # Payload数据结构
+└── processor
+    ├── {TopicName}AddProcessor.java          # 添加事件处理器
+    └── {TopicName}FixProcessor.java          # 订正事件处理器
+```
+
+## 输出要求
+1. **Payload数据结构**：必须包含完整的字段定义、JSON注解、getter/setter方法
+2. **DataStream API作业**：必须支持动态路由、热部署、故障隔离
+3. **Flink SQL作业**：必须包含完整的表定义、业务逻辑、监控视图
+4. **部署文档**：必须包含配置管理、部署步骤、监控告警、运维操作
+
 ## 生成的文件清单
 - Catalog创建语句
 - DataStream API作业代码
@@ -703,6 +733,8 @@ flink run \
 - 部署配置文件
 - 作业说明文档
 - 运维指南
+- Payload数据结构类
+- 事件处理器类
 ```
 </output_format>
 
