@@ -20,6 +20,10 @@ alwaysApply: false
 8. 监控和指标：实时监控和性能指标收集
 9. 容器化部署：Docker + docker-compose 部署方案
 10. 阿里云优化：针对阿里云Flink的深度优化
+11. 可扩展架构：支持新topic和子type的快速扩展
+12. 单topic多子type路由：一个topic下所有子type的动态路由
+13. 最小化改动：只需添加processor和payload，核心逻辑不变
+14. 自动发现机制：自动发现新的processor和payload类型
 </background>
 
 <skills>
@@ -119,7 +123,193 @@ alwaysApply: false
 </workflow>
 
 <examples>
-【示例1：动态路由配置管理器】
+【示例1：可扩展动态路由架构】
+```java
+/**
+ * 可扩展动态路由架构设计
+ * 支持新topic和子type的快速扩展
+ */
+
+// 1. 统一事件基类
+@Data
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = UserEvent.class, name = "user"),
+    @JsonSubTypes.Type(value = OrderEvent.class, name = "order"),
+    @JsonSubTypes.Type(value = ProductEvent.class, name = "product")
+    // 新增子type只需在这里添加
+})
+public abstract class BaseEvent {
+    private String eventId;
+    private String topic;
+    private String type;      // 子type
+    private String subType;   // 更细粒度的子type
+    private Long timestamp;
+    private String source;
+    
+    // 抽象方法，子类实现
+    public abstract String getProcessorKey();
+    public abstract Object getPayload();
+}
+
+// 2. 自动发现的处理器工厂
+@Component
+@Slf4j
+public class ExtensibleProcessorFactory {
+    
+    private final Map<String, EventProcessor<?>> processorCache = new ConcurrentHashMap<>();
+    private final ApplicationContext applicationContext;
+    
+    @Autowired
+    public ExtensibleProcessorFactory(ApplicationContext applicationContext) {
+        this.applicationContext = applicationContext;
+        this.initializeProcessors();
+    }
+    
+    /**
+     * 自动发现并初始化所有处理器
+     */
+    @PostConstruct
+    public void initializeProcessors() {
+        // 自动扫描所有实现EventProcessor接口的Bean
+        Map<String, EventProcessor> processors = applicationContext.getBeansOfType(EventProcessor.class);
+        
+        for (Map.Entry<String, EventProcessor> entry : processors.entrySet()) {
+            EventProcessor<?> processor = entry.getValue();
+            
+            // 通过注解获取处理器支持的事件类型
+            ProcessorConfig config = processor.getClass().getAnnotation(ProcessorConfig.class);
+            if (config != null) {
+                for (String eventType : config.eventTypes()) {
+                    processorCache.put(eventType, processor);
+                    log.info("注册处理器: {} -> {}", eventType, processor.getClass().getSimpleName());
+                }
+            }
+        }
+    }
+    
+    /**
+     * 获取事件处理器（支持动态加载）
+     */
+    public EventProcessor<?> getProcessor(String topic, String type, String subType) {
+        String processorKey = buildProcessorKey(topic, type, subType);
+        
+        // 先从缓存获取
+        EventProcessor<?> processor = processorCache.get(processorKey);
+        if (processor != null) {
+            return processor;
+        }
+        
+        // 尝试动态加载
+        processor = dynamicLoadProcessor(processorKey);
+        if (processor != null) {
+            processorCache.put(processorKey, processor);
+            return processor;
+        }
+        
+        // 使用默认处理器
+        return getDefaultProcessor(topic);
+    }
+    
+    private String buildProcessorKey(String topic, String type, String subType) {
+        if (subType != null && !subType.isEmpty()) {
+            return topic + ":" + type + ":" + subType;
+        }
+        return topic + ":" + type;
+    }
+    
+    /**
+     * 动态加载处理器
+     */
+    private EventProcessor<?> dynamicLoadProcessor(String processorKey) {
+        try {
+            // 根据命名约定尝试加载处理器类
+            String className = generateProcessorClassName(processorKey);
+            Class<?> processorClass = Class.forName(className);
+            
+            if (EventProcessor.class.isAssignableFrom(processorClass)) {
+                EventProcessor<?> processor = (EventProcessor<?>) processorClass.getDeclaredConstructor().newInstance();
+                // 注入依赖
+                applicationContext.getAutowireCapableBeanFactory().autowireBean(processor);
+                log.info("动态加载处理器成功: {}", className);
+                return processor;
+            }
+        } catch (Exception e) {
+            log.debug("动态加载处理器失败: {}", processorKey, e);
+        }
+        return null;
+    }
+    
+    private String generateProcessorClassName(String processorKey) {
+        // 根据processorKey生成处理器类名
+        // 例如: user:login -> com.flink.realtime.processor.impl.UserLoginProcessor
+        String[] parts = processorKey.split(":");
+        StringBuilder className = new StringBuilder("com.flink.realtime.processor.impl.");
+        
+        for (String part : parts) {
+            className.append(capitalize(part));
+        }
+        className.append("Processor");
+        
+        return className.toString();
+    }
+    
+    private String capitalize(String str) {
+        return str.substring(0, 1).toUpperCase() + str.substring(1);
+    }
+}
+
+// 3. 处理器配置注解
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ProcessorConfig {
+    String[] eventTypes();  // 支持的事件类型
+    String description() default "";
+    int priority() default 0;
+}
+
+// 4. 可扩展的动态路由处理函数
+@Slf4j
+public class ExtensibleDynamicRoutingFunction extends ProcessFunction<BaseEvent, ProcessedEvent> {
+    
+    @Autowired
+    private ExtensibleProcessorFactory processorFactory;
+    
+    @Override
+    public void processElement(BaseEvent event, Context ctx, Collector<ProcessedEvent> collector) throws Exception {
+        try {
+            String topic = event.getTopic();
+            String type = event.getType();
+            String subType = event.getSubType();
+            
+            log.debug("处理事件: topic={}, type={}, subType={}, eventId={}", 
+                    topic, type, subType, event.getEventId());
+            
+            // 获取对应的处理器
+            EventProcessor<BaseEvent> processor = 
+                    (EventProcessor<BaseEvent>) processorFactory.getProcessor(topic, type, subType);
+            
+            if (processor == null) {
+                log.warn("未找到处理器: topic={}, type={}, subType={}", topic, type, subType);
+                collector.collect(createUnknownTypeEvent(event));
+                return;
+            }
+            
+            // 处理事件
+            processor.process(event, new SafeCollector(collector, event));
+            
+        } catch (Exception e) {
+            log.error("处理事件失败: topic={}, type={}, subType={}, eventId={}", 
+                    event.getTopic(), event.getType(), event.getSubType(), event.getEventId(), e);
+            
+            // 发送到死信队列
+            collector.collect(createDeadLetterEvent(event, e));
+        }
+    }
+}
+```
+
+【示例2：动态路由配置管理器】
 ```java
 @Component
 @Slf4j

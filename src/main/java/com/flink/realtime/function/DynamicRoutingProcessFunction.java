@@ -55,6 +55,7 @@ public class DynamicRoutingProcessFunction
             throws Exception {
         
         long startTime = System.currentTimeMillis();
+        // 二级路由：topic:type
         String routingKey = event.getDomain() + ":" + event.getType();
         
         try {
@@ -84,20 +85,28 @@ public class DynamicRoutingProcessFunction
             ProcessedEvent processedEvent = new ProcessedEvent(event, result, config.getOutputConfig());
             processedEvent.setProcessorClass(config.getProcessorClass());
             
+            // 设置输出目标（支持MySQL和Kafka双输出）
+            if (config.getOutputConfig() != null) {
+                Object sinks = config.getOutputConfig().get("sinks");
+                if (sinks instanceof java.util.List) {
+                    processedEvent.setOutputTargets((java.util.List<String>) sinks);
+                }
+            }
+            
             out.collect(processedEvent);
             
             // 记录指标
             metricsReporter.recordEventProcessed(event.toString().length());
             
             long processingTime = System.currentTimeMillis() - startTime;
-            logger.debug("事件处理完成: {}, 耗时: {}ms, 处理器: {}", 
-                    event.getEventId(), processingTime, config.getProcessorClass());
+            logger.debug("事件处理完成: {}, 耗时: {}ms, 处理器: {}, 路由: {}", 
+                    event.getEventId(), processingTime, config.getProcessorClass(), routingKey);
             
         } catch (Exception e) {
-            logger.error("事件处理失败: {}", event, e);
+            logger.error("事件处理失败: 路由={}, 事件={}", routingKey, event, e);
             metricsReporter.recordEventFailed();
             
-            // 可以选择发送到死信队列
+            // 发送到死信队列
             sendToDeadLetterQueue(event, e);
         }
     }

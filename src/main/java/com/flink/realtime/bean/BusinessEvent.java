@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * 业务事件统一数据模型
- * 格式：业务域统一topic + 内部子type + payload数据
+ * 格式：业务域topic + 事件type + payload数据（二级路由）
  * 
  * @author yangfanlin
  * @date 2025-01-17

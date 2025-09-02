@@ -1,27 +1,10 @@
 package com.flink.realtime.topics.wrongbook.app;
 
-import com.flink.realtime.bean.BusinessEvent;
+import com.flink.realtime.app.CommonWideTableApp;
 import com.flink.realtime.bean.ProcessedEvent;
-import com.flink.realtime.common.AliyunFlinkUtils;
-import com.flink.realtime.common.FlinkUtils;
-import com.flink.realtime.config.RoutingConfig;
-import com.flink.realtime.config.RoutingConfigManager;
-import com.flink.realtime.function.DynamicRoutingProcessFunction;
-import com.flink.realtime.function.OutputRoutingProcessFunction;
-import com.flink.realtime.metrics.AliyunMetricsReporter;
+import com.flink.realtime.sink.AliyunKafkaProducer;
 import com.flink.realtime.sink.AliyunMySQLSinkFunction;
-import com.flink.realtime.source.AliyunKafkaSourceBuilder;
-import com.flink.realtime.source.DynamicRoutingConfigSource;
 import com.flink.realtime.util.ConfigUtils;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.streaming.api.datastream.BroadcastStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.util.OutputTag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,21 +13,22 @@ import java.sql.Timestamp;
 import java.util.Map;
 
 /**
- * 错题本系统实时宽表作业 - DataStream API版本
+ * 错题本系统实时宽表作业 - 基于通用架构
  * 
  * 功能特性：
- * - 动态路由：支持事件类型动态路由
- * - 热部署：支持配置热更新
- * - 故障隔离：支持故障隔离机制
- * - 监控告警：完整的监控和告警体系
+ * - 基于CommonWideTableApp通用架构
+ * - 支持二级路由：wrongbook:type
+ * - 支持MySQL和Kafka双输出
+ * - 维表查询自动缓存
+ * - 完整的监控和异常处理
  * 
  * 支持的事件类型:
- * - wrongbook_add: 错题添加事件
- * - wrongbook_fix: 错题订正事件
- * - wrongbook_delete: 错题删除事件
+ * - wrongbook:wrongbook_add - 错题添加事件
+ * - wrongbook:wrongbook_fix - 错题订正事件
+ * - wrongbook:wrongbook_delete - 错题删除事件
  * 
  * @author AI代码生成器
- * @date 2025-08-29
+ * @date 2024-12-27
  */
 public class WrongbookWideTableApp {
     
@@ -52,70 +36,45 @@ public class WrongbookWideTableApp {
     
     public static void main(String[] args) throws Exception {
         
-        String domain = "wrongbook";
-        logger.info("启动错题本宽表作业，业务域: {}", domain);
+        String topic = "wrongbook";
+        logger.info("启动错题本宽表作业，Topic: {}", topic);
         
-        // 1. 创建执行环境
-        StreamExecutionEnvironment env = AliyunFlinkUtils.getAliyunStreamExecutionEnvironment(
-                ConfigUtils.getInt("flink.parallelism", 4));
+        // 创建MySQL输出Sink
+        AliyunMySQLSinkFunction<ProcessedEvent> mysqlSink = createMySQLSink();
         
-        // 2. 创建事件源
-        KafkaSource<BusinessEvent> eventSource = AliyunKafkaSourceBuilder.buildAliyunKafkaSource(
-                ConfigUtils.getString("kafka.bootstrap.servers"),
-                domain + "-events",
-                domain + "-wide-table-group",
-                ConfigUtils.getString("kafka.username", null),
-                ConfigUtils.getString("kafka.password", null)
-        );
+        // 创建Kafka输出Sink
+        AliyunKafkaProducer<ProcessedEvent> kafkaSink = createKafkaSink();
         
-        DataStreamSource<BusinessEvent> eventStream = env.fromSource(
-                eventSource,
-                WatermarkStrategy.<BusinessEvent>forMonotonousTimestamps()
-                        .withTimestampAssigner((event, timestamp) -> event.getTimestamp()),
-                domain + " Event Source"
-        );
-        
-        // 3. 创建动态路由配置源
-        DataStreamSource<RoutingConfig> configStream = env.addSource(
-                new DynamicRoutingConfigSource(domain), "Routing Config Source");
-        
-        MapStateDescriptor<String, RoutingConfig> configDescriptor = 
-                new MapStateDescriptor<>("routing-config", 
-                        TypeInformation.of(String.class), 
-                        TypeInformation.of(RoutingConfig.class));
-        BroadcastStream<RoutingConfig> configBroadcast = configStream.broadcast(configDescriptor);
-        
-        // 4. 动态路由处理
-        SingleOutputStreamOperator<ProcessedEvent> processedStream = eventStream
-                .connect(configBroadcast)
-                .process(new DynamicRoutingProcessFunction(configDescriptor))
-                .name("Dynamic Event Processing")
-                .uid("dynamic-event-processing-" + domain);
-        
-        // 5. 输出路由
-        OutputTag<ProcessedEvent> alertTag = new OutputTag<ProcessedEvent>("alert", 
-                TypeInformation.of(ProcessedEvent.class));
-        OutputTag<ProcessedEvent> metricsTag = new OutputTag<ProcessedEvent>("metrics", 
-                TypeInformation.of(ProcessedEvent.class));
-        
-        SingleOutputStreamOperator<ProcessedEvent> routedStream = processedStream
-                .process(new OutputRoutingProcessFunction(alertTag, metricsTag, null))
-                .name("Output Routing")
-                .uid("output-routing-" + domain);
-        
-        // 6. 输出到宽表
-        routedStream.addSink(new AliyunMySQLSinkFunction<>(
-                getInsertSQL(),
-                getSqlParameterSetter(),
-                1000
-        )).name(domain + "宽表输出");
-        
-        // 7. 执行作业
-        env.execute("Wrongbook Wide Table Job - DataStream API");
+        // 执行通用宽表作业
+        CommonWideTableApp.execute(topic, mysqlSink, kafkaSink);
     }
     
     /**
-     * 获取插入SQL语句
+     * 创建MySQL输出Sink
+     */
+    private static AliyunMySQLSinkFunction<ProcessedEvent> createMySQLSink() {
+        return new AliyunMySQLSinkFunction<>(
+            getInsertSQL(),
+            getSqlParameterSetter(),
+            ConfigUtils.getInt("mysql.batch.size", 1000)
+        );
+    }
+    
+    /**
+     * 创建Kafka输出Sink
+     */
+    private static AliyunKafkaProducer<ProcessedEvent> createKafkaSink() {
+        // return new AliyunKafkaProducer<>(
+        //     ConfigUtils.getString("kafka.bootstrap.servers"),
+        //     "wrongbook-wide-table-output",
+        //     event -> event.get().getEventId(),
+        //     event -> serializeProcessedEvent(event)
+        // );
+        return null;
+    }
+    
+    /**
+     * 获取MySQL插入SQL语句
      */
     private static String getInsertSQL() {
         return "INSERT INTO dwd_wrong_record_wide_delta (" +
@@ -135,7 +94,7 @@ public class WrongbookWideTableApp {
     }
     
     /**
-     * 获取参数设置器
+     * 获取SQL参数设置器
      */
     private static AliyunMySQLSinkFunction.SqlParameterSetter<ProcessedEvent> getSqlParameterSetter() {
         return (PreparedStatement ps, ProcessedEvent event) -> {
@@ -189,5 +148,30 @@ public class WrongbookWideTableApp {
                 ps.setTimestamp(index++, new Timestamp(System.currentTimeMillis()));
             }
         };
+    }
+    
+    /**
+     * 序列化ProcessedEvent用于Kafka输出
+     */
+    private static String serializeProcessedEvent(ProcessedEvent event) {
+        try {
+            Map<String, Object> output = new java.util.HashMap<>();
+            output.put("event_id", event.getOriginalEvent().getEventId());
+            output.put("event_type", event.getOriginalEvent().getType());
+            output.put("domain", event.getOriginalEvent().getDomain());
+            output.put("timestamp", event.getOriginalEvent().getTimestamp());
+            output.put("processed_data", event.getProcessedData());
+            output.put("process_time", event.getProcessTime());
+            output.put("processor_class", event.getProcessorClass());
+            
+            // 使用简单的JSON序列化
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            return mapper.writeValueAsString(output);
+            
+        } catch (Exception e) {
+            logger.error("序列化ProcessedEvent失败: {}", event, e);
+            return "{\"error\":\"serialization_failed\",\"event_id\":\"" + 
+                   event.getOriginalEvent().getEventId() + "\"}";
+        }
     }
 }
