@@ -30,12 +30,18 @@ import org.slf4j.LoggerFactory;
  * 功能特性：
  * - 支持任意topic的动态路由处理
  * - 统一的事件处理流程
- * - 支持MySQL和Kafka双输出
+ * - 纯路由转发，Sink逻辑由Processor决定
  * - 完整的监控和异常处理
  * 
  * 使用方式：
- * 1. 直接调用: CommonWideTableApp.execute("wrongbook", mysqlSink, kafkaSink)
- * 2. 继承使用: 继承该类并实现具体的Sink逻辑
+ * ```java
+ * CommonWideTableApp.execute("wrongbook");
+ * ```
+ * 
+ * 职责分工：
+ * - CommonWideTableApp: 负责路由发现和type转发
+ * - Processor: 负责业务逻辑和输出决策
+ * - UnifiedSinkService: 负责统一的输出服务
  * 
  * @author AI代码生成器
  * @date 2024-12-27
@@ -45,15 +51,11 @@ public class CommonWideTableApp {
     private static final Logger logger = LoggerFactory.getLogger(CommonWideTableApp.class);
     
     /**
-     * 执行通用宽表作业
+     * 执行通用宽表作业（简化版本）
      * 
      * @param topic 业务topic名称
-     * @param mysqlSink MySQL输出Sink（可选）
-     * @param kafkaSink Kafka输出Sink（可选）
      */
-    public static void execute(String topic, 
-                              AliyunMySQLSinkFunction<ProcessedEvent> mysqlSink,
-                              AliyunKafkaProducer<ProcessedEvent> kafkaSink) throws Exception {
+    public static void execute(String topic) throws Exception {
         
         logger.info("启动通用宽表作业，Topic: {}", topic);
         
@@ -67,17 +69,14 @@ public class CommonWideTableApp {
         // 3. 创建动态路由配置广播流
         BroadcastStream<RoutingConfig> configBroadcast = createConfigBroadcast(env, topic);
         
-        // 4. 动态路由处理
+        // 4. 动态路由处理（Processor内部处理输出）
         SingleOutputStreamOperator<ProcessedEvent> processedStream = createDynamicRouting(
                 eventStream, configBroadcast, topic);
         
-        // 5. 输出路由处理
-        DataStream<ProcessedEvent> routedStream = createOutputRouting(processedStream, topic);
+        // 5. 注意：不再需要统一的Sink配置，每个Processor自己决定输出
+        // Processor内部会调用UnifiedSinkService进行输出
         
-        // 6. 配置输出Sink
-        configureSinks(routedStream, mysqlSink, kafkaSink, topic);
-        
-        // 7. 执行作业
+        // 6. 执行作业
         String jobName = String.format("%s Wide Table Job - Common", 
                 topic.substring(0, 1).toUpperCase() + topic.substring(1));
         env.execute(jobName);
@@ -149,121 +148,5 @@ public class CommonWideTableApp {
         return processedStream;
     }
     
-    /**
-     * 创建输出路由处理
-     */
-    private static DataStream<ProcessedEvent> createOutputRouting(
-            SingleOutputStreamOperator<ProcessedEvent> processedStream, String topic) {
-        
-        // 定义侧流输出标签
-        OutputTag<ProcessedEvent> alertTag = new OutputTag<ProcessedEvent>("alert", 
-                TypeInformation.of(ProcessedEvent.class));
-        OutputTag<ProcessedEvent> metricsTag = new OutputTag<ProcessedEvent>("metrics", 
-                TypeInformation.of(ProcessedEvent.class));
-        OutputTag<ProcessedEvent> auditTag = new OutputTag<ProcessedEvent>("audit", 
-                TypeInformation.of(ProcessedEvent.class));
-        
-        SingleOutputStreamOperator<ProcessedEvent> routedStream = processedStream
-                .process(new OutputRoutingProcessFunction(alertTag, metricsTag, auditTag))
-                .name("Output Routing")
-                .uid("output-routing-" + topic);
-        
-        // 处理侧流输出（告警、指标、审计）
-        DataStream<ProcessedEvent> alertStream = routedStream.getSideOutput(alertTag);
-        DataStream<ProcessedEvent> metricsStream = routedStream.getSideOutput(metricsTag);
-        DataStream<ProcessedEvent> auditStream = routedStream.getSideOutput(auditTag);
-        
-        // 可以在这里添加侧流的处理逻辑
-        handleSideStreams(alertStream, metricsStream, auditStream, topic);
-        
-        logger.info("输出路由处理创建完成，Topic: {}", topic);
-        return routedStream;
-    }
-    
-    /**
-     * 配置输出Sink
-     */
-    private static void configureSinks(DataStream<ProcessedEvent> routedStream,
-                                     AliyunMySQLSinkFunction<ProcessedEvent> mysqlSink,
-                                     AliyunKafkaProducer<ProcessedEvent> kafkaSink,
-                                     String topic) {
-        
-        // MySQL输出
-        if (mysqlSink != null) {
-            routedStream
-                .filter(event -> shouldWriteToMySQL(event))
-                .addSink(mysqlSink)
-                .name(topic + " MySQL Sink");
-            logger.info("MySQL Sink配置完成，Topic: {}", topic);
-        }
-        
-        // Kafka输出
-        if (kafkaSink != null) {
-            routedStream
-                .filter(event -> shouldWriteToKafka(event))
-                .addSink(kafkaSink)
-                .name(topic + " Kafka Sink");
-            logger.info("Kafka Sink配置完成，Topic: {}", topic);
-        }
-        
-        // 如果两个Sink都没有配置，添加一个Print Sink用于调试
-        if (mysqlSink == null && kafkaSink == null) {
-            routedStream.print().name(topic + " Debug Print");
-            logger.warn("未配置任何Sink，使用Print Sink进行调试，Topic: {}", topic);
-        }
-    }
-    
-    /**
-     * 处理侧流输出
-     */
-    private static void handleSideStreams(DataStream<ProcessedEvent> alertStream,
-                                        DataStream<ProcessedEvent> metricsStream,
-                                        DataStream<ProcessedEvent> auditStream,
-                                        String topic) {
-        
-        // 告警流处理
-        alertStream.addSink(new AliyunKafkaProducer<>(
-                ConfigUtils.getString("kafka.bootstrap.servers"),
-                "alert-events",
-                event -> event.getOriginalEvent().getEventId(),
-                event -> event.toString()
-        )).name(topic + " Alert Sink");
-        
-        // 指标流处理
-        metricsStream.addSink(new AliyunKafkaProducer<>(
-                ConfigUtils.getString("kafka.bootstrap.servers"),
-                "metrics-events", 
-                event -> event.getOriginalEvent().getEventId(),
-                event -> event.toString()
-        )).name(topic + " Metrics Sink");
-        
-        // 审计流处理
-        auditStream.addSink(new AliyunKafkaProducer<>(
-                ConfigUtils.getString("kafka.bootstrap.servers"),
-                "audit-events",
-                event -> event.getOriginalEvent().getEventId(),
-                event -> event.toString()
-        )).name(topic + " Audit Sink");
-        
-        logger.info("侧流处理配置完成，Topic: {}", topic);
-    }
-    
-    /**
-     * 判断是否应该写入MySQL
-     */
-    private static boolean shouldWriteToMySQL(ProcessedEvent event) {
-        return event.getOutputTargets() == null || 
-               event.getOutputTargets().isEmpty() ||
-               event.getOutputTargets().contains("mysql") ||
-               event.getOutputTargets().contains("wide_table");
-    }
-    
-    /**
-     * 判断是否应该写入Kafka
-     */
-    private static boolean shouldWriteToKafka(ProcessedEvent event) {
-        return event.getOutputTargets() != null && 
-               (event.getOutputTargets().contains("kafka") ||
-                event.getOutputTargets().contains("downstream_topic"));
-    }
+
 }

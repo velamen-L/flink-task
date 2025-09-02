@@ -78,22 +78,8 @@ public class DynamicRoutingProcessFunction
                 return;
             }
             
-            // 处理事件
-            Object result = processor.process(event);
-            
-            // 构造输出事件
-            ProcessedEvent processedEvent = new ProcessedEvent(event, result, config.getOutputConfig());
-            processedEvent.setProcessorClass(config.getProcessorClass());
-            
-            // 设置输出目标（支持MySQL和Kafka双输出）
-            if (config.getOutputConfig() != null) {
-                Object sinks = config.getOutputConfig().get("sinks");
-                if (sinks instanceof java.util.List) {
-                    processedEvent.setOutputTargets((java.util.List<String>) sinks);
-                }
-            }
-            
-            out.collect(processedEvent);
+            // 处理事件（Processor内部决定输出）
+            processor.process(event, out);
             
             // 记录指标
             metricsReporter.recordEventProcessed(event.toString().length());
