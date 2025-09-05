@@ -5,10 +5,12 @@ import com.flink.realtime.bean.BusinessEvent;
 import com.flink.realtime.bean.ProcessedEvent;
 import com.flink.realtime.common.DimTableQueryService;
 import com.flink.realtime.common.UnifiedSinkService;
+import com.flink.realtime.topics.wrongbook.sink.WrongbookMySQLBuilder;
 import com.flink.realtime.processor.EventProcessor;
 import com.flink.realtime.processor.ProcessorConfig;
 import com.flink.realtime.topics.wrongbook.bean.WrongbookPayload;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +44,7 @@ public class WrongbookAddProcessor implements EventProcessor {
     
     // 缓存Sink实例
     private SinkFunction<ProcessedEvent> mysqlSink;
-    private SinkFunction<ProcessedEvent> kafkaSink;
+    private KafkaSink<ProcessedEvent> kafkaSink;
     
     @Override
     public void process(BusinessEvent event, Collector<ProcessedEvent> collector) throws Exception {
@@ -184,7 +186,7 @@ public class WrongbookAddProcessor implements EventProcessor {
             if (mysqlSink == null) {
                 mysqlSink = sinkService.createMySQLSink(
                     "dwd_wrong_record_wide_delta",
-                    new UnifiedSinkService.WrongbookMySQLBuilder()
+                    new WrongbookMySQLBuilder()
                 );
             }
             

@@ -14,11 +14,9 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,7 +55,7 @@ public class UnifiedSinkService {
     
     // 缓存的Sink实例
     private final Map<String, SinkFunction<ProcessedEvent>> mysqlSinkCache = new ConcurrentHashMap<>();
-    private final Map<String, SinkFunction<ProcessedEvent>> kafkaSinkCache = new ConcurrentHashMap<>();
+    private final Map<String, KafkaSink<ProcessedEvent>> kafkaSinkCache = new ConcurrentHashMap<>();
     
     private UnifiedSinkService() {
         logger.info("统一Sink服务初始化完成");
@@ -125,7 +123,7 @@ public class UnifiedSinkService {
      * @param topicName Topic名称
      * @return Kafka Sink
      */
-    public SinkFunction<ProcessedEvent> createKafkaSink(String topicName) {
+    public KafkaSink<ProcessedEvent> createKafkaSink(String topicName) {
         
         return kafkaSinkCache.computeIfAbsent(topicName, key -> {
             
@@ -173,74 +171,7 @@ public class UnifiedSinkService {
         void setParameters(PreparedStatement ps, ProcessedEvent event) throws SQLException;
     }
     
-    /**
-     * 错题本MySQL SQL构建器
-     */
-    public static class WrongbookMySQLBuilder implements MySQLSqlBuilder {
-        
-        @Override
-        public String buildInsertSQL(String tableName) {
-            return "INSERT INTO " + tableName + " (" +
-                    "id, wrong_id, user_id, subject, subject_name, question_id, question, " +
-                    "pattern_id, pattern_name, teach_type_id, teach_type_name, " +
-                    "collect_time, fix_id, fix_time, fix_result, fix_result_desc, " +
-                    "event_id, event_type, process_time" +
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-                    "ON DUPLICATE KEY UPDATE " +
-                    "subject = VALUES(subject), subject_name = VALUES(subject_name), " +
-                    "question = VALUES(question), pattern_name = VALUES(pattern_name), " +
-                    "teach_type_id = VALUES(teach_type_id), teach_type_name = VALUES(teach_type_name), " +
-                    "fix_id = VALUES(fix_id), fix_time = VALUES(fix_time), " +
-                    "fix_result = VALUES(fix_result), fix_result_desc = VALUES(fix_result_desc), " +
-                    "event_id = VALUES(event_id), event_type = VALUES(event_type), " +
-                    "process_time = VALUES(process_time)";
-        }
-        
-        @Override
-        public void setParameters(PreparedStatement ps, ProcessedEvent event) throws SQLException {
-            Map<String, Object> data = (Map<String, Object>) event.getProcessedData();
-            
-            int index = 1;
-            ps.setLong(index++, (Long) data.get("id"));
-            ps.setString(index++, (String) data.get("wrong_id"));
-            ps.setString(index++, (String) data.get("user_id"));
-            ps.setString(index++, (String) data.get("subject"));
-            ps.setString(index++, (String) data.get("subject_name"));
-            ps.setString(index++, (String) data.get("question_id"));
-            ps.setString(index++, (String) data.get("question"));
-            ps.setString(index++, (String) data.get("pattern_id"));
-            ps.setString(index++, (String) data.get("pattern_name"));
-            ps.setString(index++, (String) data.get("teach_type_id"));
-            ps.setString(index++, (String) data.get("teach_type_name"));
-            
-            // 时间字段处理
-            setTimestampParameter(ps, index++, data.get("collect_time"));
-            ps.setString(index++, (String) data.get("fix_id"));
-            setTimestampParameter(ps, index++, data.get("fix_time"));
-            
-            Object fixResult = data.get("fix_result");
-            if (fixResult instanceof Number) {
-                ps.setLong(index++, ((Number) fixResult).longValue());
-            } else {
-                ps.setLong(index++, 0L);
-            }
-            
-            ps.setString(index++, (String) data.get("fix_result_desc"));
-            ps.setString(index++, (String) data.get("event_id"));
-            ps.setString(index++, (String) data.get("event_type"));
-            setTimestampParameter(ps, index++, data.get("process_time"));
-        }
-        
-        private void setTimestampParameter(PreparedStatement ps, int index, Object value) throws SQLException {
-            if (value instanceof Timestamp) {
-                ps.setTimestamp(index, (Timestamp) value);
-            } else if (value instanceof Long) {
-                ps.setTimestamp(index, new Timestamp((Long) value));
-            } else {
-                ps.setTimestamp(index, new Timestamp(System.currentTimeMillis()));
-            }
-        }
-    }
+
     
     /**
      * Kafka序列化器
@@ -282,14 +213,18 @@ public class UnifiedSinkService {
         }
         
         private String serializeEvent(ProcessedEvent event) throws Exception {
-            Map<String, Object> output = new java.util.HashMap<>();
-            output.put("event_id", event.getOriginalEvent().getEventId());
-            output.put("event_type", event.getOriginalEvent().getType());
-            output.put("domain", event.getOriginalEvent().getDomain());
-            output.put("timestamp", event.getOriginalEvent().getTimestamp());
-            output.put("processed_data", event.getProcessedData());
-            output.put("process_time", event.getProcessTime());
-            output.put("processor_class", event.getProcessorClass());
+            // 直接序列化处理后的数据，而不是整个事件对象
+            // 这样Kafka中的数据就是纯粹的业务数据
+            @SuppressWarnings("unchecked")
+            Map<String, Object> processedData = (Map<String, Object>) event.getProcessedData();
+            
+            // 添加一些元数据用于追踪
+            Map<String, Object> output = new java.util.HashMap<>(processedData);
+            output.put("_event_id", event.getOriginalEvent().getEventId());
+            output.put("_event_type", event.getOriginalEvent().getType());
+            output.put("_domain", event.getOriginalEvent().getDomain());
+            output.put("_process_time", event.getProcessTime());
+            output.put("_processor_class", event.getProcessorClass());
             
             return objectMapper.writeValueAsString(output);
         }
