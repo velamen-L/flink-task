@@ -1,0 +1,81 @@
+// FlinkSQL AI Coding Platform - ER图管理Gradle脚本
+// 使用方法: gradle -b build-er-diagram.gradle generateERDiagram -PsqlFile=path/to/your.sql
+
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'net.sf.jsqlparser:jsqlparser:4.7'
+    implementation 'org.yaml:snakeyaml:2.0'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.15.2'
+}
+
+// ER图生成任务
+task generateERDiagram(type: JavaExec) {
+    description = '从SQL文件生成ER图并检测冲突'
+    
+    // 设置主类
+    mainClass = 'ERDiagramGenerator'
+    
+    // 设置类路径
+    classpath = sourceSets.main.runtimeClasspath
+    
+    // 传递参数
+    if (project.hasProperty('sqlFile')) {
+        args project.property('sqlFile')
+    }
+    if (project.hasProperty('domain')) {
+        args '--domain', project.property('domain')
+    }
+    if (project.hasProperty('output')) {
+        args '--output', project.property('output')
+    } else {
+        args '--output', 'er-diagram'
+    }
+}
+
+// 冲突检查任务
+task checkERConflicts(type: JavaExec) {
+    description = '检查ER图冲突'
+    mainClass = 'ERConflictChecker'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+// 清理ER图任务
+task cleanERDiagram(type: Delete) {
+    description = '清理生成的ER图文件'
+    delete fileTree('er-diagram') {
+        include '**/*.md'
+        include '**/*.puml'
+        include '**/*.mermaid'
+    }
+}
+
+// 创建源码目录
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src']
+        }
+        resources {
+            srcDirs = ['resources']
+        }
+    }
+}
+
+// 确保源码目录存在
+task createSourceDirs {
+    doLast {
+        file('src').mkdirs()
+        file('resources').mkdirs()
+    }
+}
+
+compileJava.dependsOn createSourceDirs

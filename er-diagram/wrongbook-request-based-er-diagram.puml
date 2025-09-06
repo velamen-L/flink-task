@@ -1,0 +1,72 @@
+@startuml
+!define TITLE wrongbook Domain Request-based ER Diagram
+title TITLE
+!theme aws-orange
+
+' SOURCE TABLES
+entity "wrongbook_fix" <<source>> {
+  * fix_id : VARCHAR(255) <<Primary key>>
+  + wrong_id : VARCHAR(255) <<Foreign key>>
+  + user_id : VARCHAR(255) <<Foreign key>>
+    subject : VARCHAR(255)
+  + question_id : VARCHAR(255) <<Foreign key>>
+  + pattern_id : VARCHAR(255) <<Foreign key>>
+    create_time : BIGINT
+    submit_time : BIGINT
+    fix_result : INT
+}
+
+' DIMENSION TABLES
+entity "wrong_question_record" <<dimension>> {
+  * id : STRING
+    user_id : STRING
+    question_id : STRING
+    pattern_id : STRING
+    subject : STRING
+    chapter_id : STRING
+    chapter_name : STRING
+    study_stage : STRING
+    course_type : STRING
+    answer_record_id : STRING
+    answer_image : STRING
+    result : TINYINT
+    correct_status : TINYINT
+    origin : STRING
+    tag_group : STRING
+    draft_image : STRING
+    q_type : INT
+    zpd_pattern_id : STRING
+    create_time : BIGINT
+    submit_time : BIGINT
+    is_delete : BOOLEAN
+}
+
+entity "tower_pattern" <<dimension>> {
+  * id : STRING
+    name : STRING
+    type : INT
+    subject : STRING
+    difficulty : DECIMAL
+    modify_time : BIGINT
+}
+
+entity "tower_teaching_type_pt" <<dimension>> {
+  * id : BIGINT
+    teaching_type_id : BIGINT
+    pt_id : STRING
+    order_num : INT
+    is_delete : TINYINT
+    modify_time : TIMESTAMP(3)
+}
+
+entity "tower_teaching_type" <<dimension>> {
+  * id : BIGINT
+    chapter_id : STRING
+    teaching_type_name : STRING
+    is_delete : TINYINT
+    modify_time : TIMESTAMP(3)
+}
+
+' RELATIONSHIPS
+
+@enduml

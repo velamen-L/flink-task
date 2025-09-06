@@ -1,0 +1,321 @@
+# FlinkSQL AI Coding 平台配置文件
+# 版本: 1.0.0
+# 更新时间: 2024-12-27
+
+# AI平台全局配置
+ai_platform:
+  version: "1.0.0"
+  environment: "development"  # development, testing, production
+  debug_mode: true
+  
+  # 大语言模型配置
+  llm:
+    primary_model: "gpt-4"
+    fallback_model: "gpt-3.5-turbo"
+    
+    # API配置
+    api:
+      openai:
+        api_key: "${OPENAI_API_KEY}"
+        base_url: "https://api.openai.com/v1"
+        timeout: 30000
+        max_retries: 3
+      
+      # 备用模型（可选）
+      claude:
+        api_key: "${CLAUDE_API_KEY}"
+        base_url: "https://api.anthropic.com"
+        model: "claude-3-sonnet-20240229"
+    
+    # 生成参数
+    generation:
+      temperature: 0.1          # 低温度确保稳定性
+      max_tokens: 4000
+      top_p: 0.9
+      frequency_penalty: 0.1
+      presence_penalty: 0.1
+
+  # 知识库配置
+  knowledge_base:
+    # 向量数据库
+    vector_db:
+      provider: "chroma"        # chroma, pinecone, weaviate
+      host: "localhost"
+      port: 8000
+      collection_name: "flinksql_knowledge"
+      
+    # 嵌入模型
+    embedding:
+      model: "text-embedding-ada-002"
+      dimension: 1536
+      chunk_size: 1000
+      chunk_overlap: 200
+    
+    # 数据源配置
+    sources:
+      # Catalog连接
+      catalog:
+        enabled: true
+        jdbc_url: "${CATALOG_JDBC_URL}"
+        username: "${CATALOG_USERNAME}"
+        password: "${CATALOG_PASSWORD}"
+        sync_interval: "1h"
+        
+      # Git仓库分析
+      git:
+        enabled: true
+        repository_path: "."
+        analyze_sql_files: true
+        analyze_config_files: true
+        
+      # 手动知识录入
+      manual:
+        business_rules_path: "job/ai-config/knowledge-base/business-rules/"
+        templates_path: "job/ai-config/knowledge-base/templates/"
+        best_practices_path: "job/ai-config/knowledge-base/best-practices/"
+
+  # 质量检查配置
+  quality_check:
+    enabled: true
+    
+    # 检查模块
+    modules:
+      syntax_check:
+        enabled: true
+        parser: "apache_calcite"
+        timeout: 10000
+        
+      performance_check:
+        enabled: true
+        rules:
+          - "check_large_table_joins"
+          - "check_missing_indexes" 
+          - "check_data_skew_risk"
+          - "check_memory_usage"
+        
+      business_rule_check:
+        enabled: true
+        rule_engine: "drools"
+        rules_path: "job/ai-config/quality-rules/"
+        
+      security_check:
+        enabled: true
+        rules:
+          - "sql_injection_check"
+          - "sensitive_data_access"
+          - "privilege_escalation"
+    
+    # 质量阈值
+    thresholds:
+      overall_score: 0.85
+      syntax_score: 0.95
+      performance_score: 0.80
+      business_rule_score: 0.90
+      security_score: 0.95
+
+  # 模板匹配配置
+  template_matching:
+    # 相似度算法
+    similarity:
+      algorithm: "cosine"       # cosine, jaccard, euclidean
+      threshold: 0.75
+      top_k: 5
+      
+    # 权重配置
+    weights:
+      semantic_similarity: 0.4
+      structural_similarity: 0.3
+      business_context: 0.2
+      historical_usage: 0.1
+
+  # 监控和日志配置
+  monitoring:
+    # 指标收集
+    metrics:
+      enabled: true
+      interval: "30s"
+      
+      # 关键指标
+      tracked_metrics:
+        - "generation_latency"
+        - "quality_score_distribution"
+        - "user_satisfaction"
+        - "template_match_rate"
+        - "error_rate"
+        
+    # 日志配置
+    logging:
+      level: "INFO"
+      include_user_inputs: false  # 隐私保护
+      include_generated_sql: true
+      include_feedback: true
+      
+      # 日志存储
+      storage:
+        type: "elasticsearch"
+        host: "localhost"
+        port: 9200
+        index: "ai_coding_logs"
+
+# 业务场景配置
+business_scenarios:
+  # 实时统计场景
+  real_time_stats:
+    description: "实时指标统计和聚合"
+    complexity: "medium"
+    
+    common_patterns:
+      - "用户行为统计"
+      - "业务指标计算" 
+      - "实时大屏数据"
+      
+    optimization_focus:
+      - "低延迟处理"
+      - "高吞吐量"
+      - "数据准确性"
+      
+  # 数据宽表场景
+  wide_table:
+    description: "多表关联生成宽表"
+    complexity: "high"
+    
+    common_patterns:
+      - "事实表+维表关联"
+      - "历史数据补全"
+      - "数据质量清洗"
+      
+    optimization_focus:
+      - "JOIN性能优化"
+      - "内存使用控制"
+      - "数据一致性"
+
+  # 实时告警场景  
+  real_time_alert:
+    description: "基于规则的实时告警"
+    complexity: "low"
+    
+    common_patterns:
+      - "阈值监控"
+      - "异常检测"
+      - "趋势分析"
+      
+    optimization_focus:
+      - "实时性保证"
+      - "误报率控制"
+      - "资源消耗优化"
+
+# 用户体验配置
+user_experience:
+  # 界面配置
+  ui:
+    theme: "dark"              # light, dark, auto
+    language: "zh-CN"          # zh-CN, en-US
+    auto_save_interval: "30s"
+    
+  # 智能提示
+  suggestions:
+    enabled: true
+    real_time: true
+    max_suggestions: 5
+    confidence_threshold: 0.7
+    
+  # 协作功能
+  collaboration:
+    enabled: true
+    version_control: true
+    comment_system: true
+    approval_workflow: true
+
+# 安全配置
+security:
+  # 身份认证
+  authentication:
+    provider: "ldap"           # ldap, oauth2, local
+    session_timeout: "8h"
+    
+  # 权限控制
+  authorization:
+    rbac_enabled: true
+    
+    # 角色定义
+    roles:
+      admin:
+        permissions: ["*"]
+        
+      developer:
+        permissions:
+          - "create_job"
+          - "edit_job"
+          - "deploy_job"
+          - "view_logs"
+          
+      viewer:
+        permissions:
+          - "view_job"
+          - "view_logs"
+          
+  # 数据安全
+  data_protection:
+    encrypt_sensitive_data: true
+    mask_pii_in_logs: true
+    audit_trail: true
+
+# 性能调优配置
+performance:
+  # 并发控制
+  concurrency:
+    max_concurrent_generations: 10
+    queue_size: 100
+    timeout: "5m"
+    
+  # 缓存配置
+  cache:
+    enabled: true
+    provider: "redis"
+    host: "localhost"
+    port: 6379
+    
+    # 缓存策略
+    strategies:
+      template_cache:
+        ttl: "1h"
+        max_size: 1000
+        
+      sql_generation_cache:
+        ttl: "30m"
+        max_size: 500
+        
+      quality_check_cache:
+        ttl: "15m"
+        max_size: 200
+
+# 部署配置
+deployment:
+  # 环境配置
+  environments:
+    development:
+      flink_cluster: "http://localhost:8081"
+      checkpoint_interval: "60s"
+      parallelism: 2
+      
+    testing:
+      flink_cluster: "http://test-flink:8081"
+      checkpoint_interval: "30s"
+      parallelism: 4
+      
+    production:
+      flink_cluster: "http://prod-flink:8081"
+      checkpoint_interval: "10s"
+      parallelism: 8
+      
+  # 自动部署
+  auto_deployment:
+    enabled: false
+    approval_required: true
+    rollback_on_failure: true
+    
+  # 监控集成
+  monitoring_integration:
+    prometheus_enabled: true
+    grafana_dashboard: true
+    alert_manager: true

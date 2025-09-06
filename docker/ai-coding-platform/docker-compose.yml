@@ -1,0 +1,189 @@
+# FlinkSQL AI Coding Platform Docker Compose 配置
+version: '3.8'
+
+services:
+  # AI Coding 主应用
+  ai-coding-platform:
+    build:
+      context: ../../
+      dockerfile: docker/ai-coding-platform/Dockerfile
+    container_name: ai-coding-platform
+    ports:
+      - "8080:8080"    # Web界面
+      - "8081:8081"    # 管理端口
+      - "9090:9090"    # 监控端口
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - DATABASE_URL=jdbc:postgresql://postgres:5432/ai_coding
+      - DATABASE_USERNAME=ai_coding
+      - DATABASE_PASSWORD=ai_coding_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    volumes:
+      - ./data/knowledge-base:/app/knowledge-base
+      - ./data/logs:/app/logs
+      - ./data/config:/app/config
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+      - chroma
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-coding-postgres
+    environment:
+      - POSTGRES_DB=ai_coding
+      - POSTGRES_USER=ai_coding
+      - POSTGRES_PASSWORD=ai_coding_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: ai-coding-redis
+    command: redis-server --requirepass redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/etc/redis/redis.conf
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # Elasticsearch 搜索引擎
+  elasticsearch:
+    image: elasticsearch:8.8.0
+    container_name: ai-coding-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # ChromaDB 向量数据库
+  chroma:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: ai-coding-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_PORT=8000
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai-coding-prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # Grafana 可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai-coding-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: ai-coding-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - ai-coding-platform
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+  # 知识库同步服务
+  knowledge-sync:
+    build:
+      context: ../../
+      dockerfile: docker/knowledge-sync/Dockerfile
+    container_name: ai-coding-knowledge-sync
+    environment:
+      - CATALOG_JDBC_URL=${CATALOG_JDBC_URL}
+      - CATALOG_USERNAME=${CATALOG_USERNAME}
+      - CATALOG_PASSWORD=${CATALOG_PASSWORD}
+      - SYNC_INTERVAL=3600  # 1小时同步一次
+    volumes:
+      - ./data/knowledge-base:/app/knowledge-base
+    depends_on:
+      - ai-coding-platform
+      - chroma
+    networks:
+      - ai-coding-network
+    restart: unless-stopped
+
+# 网络配置
+networks:
+  ai-coding-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# 数据卷
+volumes:
+  postgres_data:
+  redis_data:
+  es_data:
+  chroma_data:
+  prometheus_data:
+  grafana_data:

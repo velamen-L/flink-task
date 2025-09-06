@@ -1,0 +1,123 @@
+plugins {
+    id 'java'
+    id 'maven-publish'
+    id 'com.flink.ai.generator'
+}
+
+group = 'com.flink.realtime'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        url 'https://repo1.maven.org/maven2'
+    }
+}
+
+dependencies {
+    // Flink dependencies
+    implementation 'org.apache.flink:flink-streaming-java:1.18.0'
+    implementation 'org.apache.flink:flink-table-api-java-bridge:1.18.0'
+    implementation 'org.apache.flink:flink-table-runtime:1.18.0'
+    implementation 'org.apache.flink:flink-clients:1.18.0'
+    
+    // Connector dependencies
+    implementation 'org.apache.flink:flink-connector-kafka:1.18.0'
+    implementation 'org.apache.flink:flink-connector-jdbc:3.1.1-1.18'
+    implementation 'mysql:mysql-connector-java:8.0.33'
+    
+    // JSON processing
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.15.2'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:1.7.36'
+    implementation 'org.apache.logging.log4j:log4j-slf4j-impl:2.20.0'
+    
+    // Test dependencies
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.apache.flink:flink-test-utils:1.18.0'
+}
+
+// 配置Flink AI Generator插件
+flinkAiGenerator {
+    // 默认请求文件路径
+    requestFile = file('job/wrongbook/flink-sql-request-v3.md')
+    
+    // 输出目录
+    outputDir = layout.buildDirectory.dir('flink-ai-output')
+    
+    // ER知识库目录
+    knowledgeBaseDir = file('er-knowledge-base')
+    
+    // 业务域
+    domain = 'wrongbook'
+    
+    // 启用详细日志
+    verbose = true
+    
+    // 不跳过验证
+    skipValidation = false
+    
+    // 不强制更新ER（有冲突时提示）
+    forceERUpdate = false
+}
+
+// 自定义任务：快速生成wrongbook域的Flink SQL
+task generateWrongbookFlinkSql(type: com.flink.ai.FlinkAiWorkflowTask) {
+    group = 'flink-ai'
+    description = 'Generate Flink SQL for wrongbook domain'
+    
+    requestFile = file('job/wrongbook/flink-sql-request-v3.md')
+    outputDir = layout.buildDirectory.dir('flink-ai-output/wrongbook')
+    knowledgeBaseDir = file('er-knowledge-base')
+    domain = 'wrongbook'
+}
+
+// 自定义任务：生成所有域的Flink SQL
+task generateAllFlinkSql {
+    group = 'flink-ai'
+    description = 'Generate Flink SQL for all domains'
+    
+    doLast {
+        println "Scanning for request files in job/ directory..."
+        
+        fileTree('job').matching {
+            include '**/flink-sql-request*.md'
+        }.each { file ->
+            def domainName = file.parentFile.name
+            println "Found domain: $domainName"
+            
+            // 为每个域创建生成任务
+            tasks.create("generate${domainName.capitalize()}FlinkSql", com.flink.ai.FlinkAiWorkflowTask) {
+                requestFile = file
+                outputDir = layout.buildDirectory.dir("flink-ai-output/$domainName")
+                knowledgeBaseDir = file('er-knowledge-base')
+                domain = domainName
+            }.execute()
+        }
+    }
+}
+
+// 清理任务
+task cleanFlinkAiOutput(type: Delete) {
+    group = 'flink-ai'
+    description = 'Clean Flink AI generated output'
+    delete layout.buildDirectory.dir('flink-ai-output')
+}
+
+// 构建时自动生成
+//build.dependsOn generateWrongbookFlinkSql
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+        }
+    }
+}

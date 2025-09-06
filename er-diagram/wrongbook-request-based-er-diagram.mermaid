@@ -1,0 +1,70 @@
+erDiagram
+    %% wrongbook Domain Request-based ER Diagram
+    %% Generated: Sat Sep 06 17:13:22 GMT+08:00 2025
+    %% Tables: 5, Relations: 0
+
+    %% SOURCE TABLES
+    wrongbook_fix {
+        varchar fix_id PK "Primary key"
+        varchar wrong_id FK "Foreign key"
+        varchar user_id FK "Foreign key"
+        varchar subject
+        varchar question_id FK "Foreign key"
+        varchar pattern_id FK "Foreign key"
+        bigint create_time
+        bigint submit_time
+        int fix_result
+    }
+
+    %% DIMENSION TABLES
+    wrong_question_record {
+        string id PK
+        string user_id
+        string question_id
+        string pattern_id
+        string subject
+        string chapter_id
+        string chapter_name
+        string study_stage
+        string course_type
+        string answer_record_id
+        string answer_image
+        tinyint result
+        tinyint correct_status
+        string origin
+        string tag_group
+        string draft_image
+        int q_type
+        string zpd_pattern_id
+        bigint create_time
+        bigint submit_time
+        boolean is_delete
+    }
+
+    tower_pattern {
+        string id PK
+        string name
+        int type
+        string subject
+        decimal difficulty
+        bigint modify_time
+    }
+
+    tower_teaching_type_pt {
+        bigint id PK
+        bigint teaching_type_id
+        string pt_id
+        int order_num
+        tinyint is_delete
+        timestamp modify_time
+    }
+
+    tower_teaching_type {
+        bigint id PK
+        string chapter_id
+        string teaching_type_name
+        tinyint is_delete
+        timestamp modify_time
+    }
+
+    %% RELATIONSHIPS
