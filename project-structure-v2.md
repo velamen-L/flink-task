@@ -4,33 +4,24 @@
 
 ```
 flink-multi-source-business/
-├── jobdomain/                                    # 作业域配置和文档目录
-│   ├── wrongbook/                                # 错题本作业域
-│   │   ├── request.md                            # 作业需求配置
+├── job/                                          # 作业配置和文档目录
+│   ├── flink-sql-request-template.md             # SQL作业请求模板
+│   ├── wrongbook/                                # 错题本作业
+│   │   ├── request.md                            # 作业需求配置（JAR作业）
+│   │   ├── flink-sql-request.md                  # SQL作业请求配置
 │   │   ├── sql/                                  # 生成的SQL文件
 │   │   │   ├── wrongbook_wide_table.sql          # 错题宽表SQL
-│   │   │   └── wrongbook_analysis.sql            # 错题分析SQL
-│   │   ├── docs/                                 # 作业域文档
-│   │   │   ├── business-logic.md                 # 业务逻辑说明
-│   │   │   ├── data-flow.md                      # 数据流说明
-│   │   │   └── monitoring.md                     # 监控指标
+│   │   │   ├── wrongbook_wide_table_v2.sql       # 错题宽表SQL v2
+│   │   │   └── data_validation_wrongbook_fix.sql # 数据验证SQL
+│   │   ├── docs/                                 # 作业文档
+│   │   │   ├── DataStream API部署说明.md          # DataStream部署说明
+│   │   │   ├── 错题本Flink SQL作业配置说明.md      # SQL作业配置说明
+│   │   │   └── 错题本Payload数据结构说明.md        # Payload结构说明
 │   │   └── config/                               # 作业配置
-│   │       ├── wrongbook-job.yml                 # 作业配置文件
-│   │       └── data-sources.yml                  # 数据源配置
-│   ├── user-daily-stats/                         # 用户日统计作业域
-│   │   ├── request.md
-│   │   ├── sql/
-│   │   ├── docs/
-│   │   └── config/
-│   ├── learning-analysis/                        # 学习分析作业域
-│   │   ├── request.md
-│   │   ├── sql/
-│   │   ├── docs/
-│   │   └── config/
-│   └── templates/                                # 作业模板
-│       ├── job-request-template.md               # 作业需求模板
-│       ├── job-config-template.yml               # 作业配置模板
-│       └── docs-template/                        # 文档模板
+│   │       └── wrongbook-job.yml                 # 作业配置文件
+│   ├── user-daily-stats/                         # 用户日统计作业
+│   │   └── request.md                            # 作业需求配置
+│   └── learning-analysis/                        # 学习分析作业（预留）
 ├── src/main/java/                                # Java源码
 │   └── com/flink/business/
 │       ├── MultiSourceBusinessApplication.java   # 主应用入口

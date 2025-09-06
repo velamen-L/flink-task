@@ -42,14 +42,16 @@ biz_statistic_user      → 用户域所有事件
 
 ```
 flink-multi-source-business/
-├── jobdomain/                                    # 作业域配置目录
-│   ├── wrongbook/                                # 错题本作业域
+├── job/                                          # 作业配置目录
+│   ├── flink-sql-request-template.md             # SQL作业请求模板
+│   ├── wrongbook/                                # 错题本作业
 │   │   ├── request.md                            # 业务需求配置
+│   │   ├── flink-sql-request.md                  # SQL作业请求
 │   │   ├── config/wrongbook-job.yml              # 作业配置
 │   │   ├── sql/wrongbook_wide_table.sql          # 生成的SQL
-│   │   └── docs/business-logic.md                # 业务文档
-│   ├── user-daily-stats/                         # 用户统计作业域
-│   └── learning-analysis/                        # 学习分析作业域
+│   │   └── docs/业务逻辑说明.md                   # 业务文档
+│   ├── user-daily-stats/                         # 用户统计作业
+│   └── learning-analysis/                        # 学习分析作业
 ├── src/main/java/com/flink/business/
 │   ├── MultiSourceBusinessApplication.java       # 主应用
 │   ├── core/                                     # 核心框架
@@ -197,25 +199,25 @@ outputs:
 
 ## 🚀 开发工作流
 
-### 1. 新增作业域
+### 1. 新增作业
 ```bash
-# 1. 创建作业域目录
-mkdir -p jobdomain/new-domain/{config,sql,docs}
+# 1. 创建作业目录
+mkdir -p job/new-job/{config,sql,docs}
 
 # 2. 编写业务需求
-cp templates/request-template.md jobdomain/new-domain/request.md
+cp job/flink-sql-request-template.md job/new-job/request.md
 
 # 3. 生成作业配置
-# 使用 AI 规则生成配置文件
+# 使用 AI 规则生成配置文件和SQL
 
 # 4. 实现域处理器（可选，大部分场景使用通用处理器）
-# 创建 NewDomainJobProcessor.java
+# 创建 NewJobProcessor.java
 ```
 
 ### 2. 本地开发测试
 ```bash
-# 启动特定作业域
-mvn spring-boot:run -Dspring-boot.run.arguments="new-domain"
+# 启动特定作业
+mvn spring-boot:run -Dspring-boot.run.arguments="new-job"
 
 # 查看监控指标
 curl http://localhost:8080/actuator/metrics
@@ -228,7 +230,7 @@ mvn clean package
 
 # 提交到Flink集群
 flink run -c com.flink.business.MultiSourceBusinessApplication \
-  target/multi-source-business-app.jar new-domain
+  target/multi-source-business-app.jar new-job
 ```
 
 ## 📈 监控和运维

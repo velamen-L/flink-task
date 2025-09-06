@@ -19,6 +19,7 @@ alwaysApply: false
 7. 性能优化：维表缓存、查询优化、FOR SYSTEM_TIME AS OF PROCTIME()应用
 
 专注领域：仅生成Flink SQL作业文件，处理BusinessEvent标准事件驱动数据流
+目录结构：job/{job_name}/flink-sql-request.md → job/{job_name}/sql/{job_name}.sql
 参考文档：[阿里云Flink文档中心](https://help.aliyun.com/zh/flink/realtime-flink/?spm=a2c4g.11186623.0.0.7f2a52dbrSN1bB)
 </background>
 

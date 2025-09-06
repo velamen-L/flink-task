@@ -48,10 +48,10 @@ public class ConfigLoader {
         // 尝试从多个位置加载配置
         JobDomainConfig.DomainConfig config = null;
 
-        // 1. 从jobdomain目录加载
-        config = loadFromJobDomainDirectory(domainName);
+        // 1. 从job目录加载
+        config = loadFromJobDirectory(domainName);
         if (config != null) {
-            log.info("从jobdomain目录加载配置成功: {}", domainName);
+            log.info("从job目录加载配置成功: {}", domainName);
             return config;
         }
 
@@ -74,26 +74,26 @@ public class ConfigLoader {
     }
 
     /**
-     * 从jobdomain目录加载配置
+     * 从job目录加载配置
      */
-    private JobDomainConfig.DomainConfig loadFromJobDomainDirectory(String domainName) {
+    private JobDomainConfig.DomainConfig loadFromJobDirectory(String domainName) {
         try {
             // 尝试YAML格式
-            Path yamlPath = Paths.get("jobdomain", domainName, "config", domainName + "-job.yml");
+            Path yamlPath = Paths.get("job", domainName, "config", domainName + "-job.yml");
             if (Files.exists(yamlPath)) {
                 String content = Files.readString(yamlPath);
                 return parseYamlConfig(content);
             }
 
             // 尝试JSON格式
-            Path jsonPath = Paths.get("jobdomain", domainName, "config", domainName + "-job.json");
+            Path jsonPath = Paths.get("job", domainName, "config", domainName + "-job.json");
             if (Files.exists(jsonPath)) {
                 String content = Files.readString(jsonPath);
                 return parseJsonConfig(content);
             }
 
         } catch (Exception e) {
-            log.debug("从jobdomain目录加载配置失败: {}", domainName, e);
+            log.debug("从job目录加载配置失败: {}", domainName, e);
         }
 
         return null;
@@ -211,7 +211,7 @@ public class ConfigLoader {
     public void saveConfig(String domainName, JobDomainConfig.DomainConfig config) {
         try {
             // 确保目录存在
-            Path configDir = Paths.get("jobdomain", domainName, "config");
+            Path configDir = Paths.get("job", domainName, "config");
             Files.createDirectories(configDir);
 
             // 保存为YAML格式
@@ -231,9 +231,9 @@ public class ConfigLoader {
      * 检查配置文件是否存在
      */
     public boolean configExists(String domainName) {
-        // 检查jobdomain目录
-        Path yamlPath = Paths.get("jobdomain", domainName, "config", domainName + "-job.yml");
-        Path jsonPath = Paths.get("jobdomain", domainName, "config", domainName + "-job.json");
+        // 检查job目录
+        Path yamlPath = Paths.get("job", domainName, "config", domainName + "-job.yml");
+        Path jsonPath = Paths.get("job", domainName, "config", domainName + "-job.json");
         
         if (Files.exists(yamlPath) || Files.exists(jsonPath)) {
             return true;
@@ -251,16 +251,16 @@ public class ConfigLoader {
      * 获取配置文件路径
      */
     public String getConfigPath(String domainName) {
-        Path yamlPath = Paths.get("jobdomain", domainName, "config", domainName + "-job.yml");
+        Path yamlPath = Paths.get("job", domainName, "config", domainName + "-job.yml");
         if (Files.exists(yamlPath)) {
             return yamlPath.toString();
         }
 
-        Path jsonPath = Paths.get("jobdomain", domainName, "config", domainName + "-job.json");
+        Path jsonPath = Paths.get("job", domainName, "config", domainName + "-job.json");
         if (Files.exists(jsonPath)) {
             return jsonPath.toString();
         }
 
-        return "resources:/job-domains/" + domainName + ".yml";
+        return "resources:/job/" + domainName + ".yml";
     }
 }

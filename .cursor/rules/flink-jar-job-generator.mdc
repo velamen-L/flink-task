@@ -10,7 +10,7 @@
 4. 域处理器架构：继承AbstractBusinessProcessor，实现具体业务逻辑
 5. 统一技术栈：基于Table API的声明式编程，易于维护
 6. 企业级特性：完整的监控、告警、数据质量保障体系
-7. 标准化目录结构：jobdomain/{domain}目录管理，request.md需求配置
+7. 标准化目录结构：job/{job_name}目录管理，request.md需求配置，flink-sql-request.md SQL作业配置
 8. 智能表结构处理：自动Catalog查询和表结构解析
 9. 多连接器支持：Kafka、JDBC、ODPS等多种数据源
 10. 符合阿里云Flink开发文档的最佳实践
@@ -263,35 +263,32 @@ public class WrongbookBusinessConfig {
 }
 ```
 
-示例4：完整项目结构
+示例4：完整项目结构（基于新架构v2.0）
 ```
-wrongbook-business-job/
+multi-source-business-app/
+├── job/                                        # 作业配置目录
+│   ├── flink-sql-request-template.md          # SQL作业请求模板
+│   ├── wrongbook/                             # 错题本作业
+│   │   ├── request.md                         # JAR作业需求配置
+│   │   ├── flink-sql-request.md               # SQL作业请求配置
+│   │   ├── config/wrongbook-job.yml           # 作业配置文件
+│   │   ├── sql/                               # 生成的SQL文件
+│   │   └── docs/                              # 作业文档
+│   └── user-daily-stats/                      # 用户统计作业
 ├── src/main/java/
-│   ├── com/business/wrongbook/
-│   │   ├── WrongbookBusinessApplication.java     # 主应用入口
-│   │   ├── config/
-│   │   │   ├── WrongbookBusinessConfig.java      # 业务配置
-│   │   │   ├── FlinkTableConfig.java             # Table API配置
-│   │   │   └── DataSourceConfig.java             # 数据源配置
-│   │   ├── processor/
-│   │   │   ├── WrongbookBusinessProcessor.java   # 业务处理器
-│   │   │   ├── EventSourceManager.java          # 事件源管理
-│   │   │   └── ResultOutputManager.java         # 结果输出管理
-│   │   ├── model/
-│   │   │   ├── WrongbookFixPayload.java         # 事件Payload
-│   │   │   ├── WrongbookCollectPayload.java     # 收集事件Payload
-│   │   │   └── BusinessMetrics.java             # 业务指标模型
-│   │   ├── service/
-│   │   │   ├── DimTableService.java             # 维表查询服务
-│   │   │   ├── BusinessRuleService.java         # 业务规则服务
-│   │   │   └── MonitoringService.java           # 监控服务
-│   │   └── util/
-│   │       ├── JsonUtils.java                   # JSON工具类
-│   │       ├── TimeUtils.java                   # 时间工具类
-│   │       └── FlinkUtils.java                  # Flink工具类
+│   ├── com/flink/business/
+│   │   ├── MultiSourceBusinessApplication.java # 统一主应用入口
+│   │   ├── core/                              # 核心框架
+│   │   │   ├── config/                        # 全局配置
+│   │   │   ├── service/                       # 核心服务
+│   │   │   └── processor/                     # 处理器框架
+│   │   └── domain/                            # 域处理器
+│   │       ├── wrongbook/                     # 错题本域处理器
+│   │       │   ├── WrongbookJobProcessor.java # 错题本作业处理器
+│   │       │   └── model/                     # 业务模型
 ├── src/main/resources/
-│   ├── application.yml                          # 应用配置
-│   ├── flink-conf.yaml                         # Flink配置
+│   ├── application.yml                          # 应用配置（包含多作业域配置）
+│   ├── job-domains/                            # 作业域配置目录
 │   ├── log4j2.xml                              # 日志配置
 │   └── sql/
 │       ├── create_tables.sql                   # 建表语句
