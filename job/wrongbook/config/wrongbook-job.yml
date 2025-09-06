@@ -1,0 +1,273 @@
+# 错题本作业域配置
+# 版本: 1.0.0
+# 创建时间: 2024-12-27
+# 作业类型: SINGLE_DOMAIN
+
+metadata:
+  job-name: "wrongbook-wide-table-job"
+  job-type: "SINGLE_DOMAIN"
+  description: "错题本记录宽表生成作业"
+  version: "1.0.0"
+  business-domains: ["wrongbook"]
+  business-goals:
+    - "错题记录宽表生成"
+    - "订正效果分析"
+    - "知识点掌握度统计"
+  author: "数据开发团队"
+  create-date: "2024-12-27"
+
+# 事件源配置
+event-sources:
+  - source-name: "wrongbook_events"
+    event-domain: "wrongbook"
+    topic-name: "biz_statistic_wrongbook"
+    interested-event-types:
+      - "wrongbook_fix"
+      - "wrongbook_collect"
+    
+    # 事件过滤配置
+    filter:
+      basic-filters:
+        domain: "wrongbook"
+      custom-filters:
+        - "JSON_VALUE(payload, '$.userId') IS NOT NULL"
+        - "JSON_VALUE(payload, '$.questionId') IS NOT NULL"
+        - "JSON_VALUE(payload, '$.patternId') IS NOT NULL"
+      
+      # 时间窗口配置（可选）
+      time-window:
+        enabled: false
+        window-type: "TUMBLING"
+        window-size: 300000  # 5分钟
+    
+    # 消费者配置
+    consumer:
+      group-id: "wrongbook-job-consumer"
+      startup-mode: "latest"
+      kafka-properties:
+        auto.offset.reset: "latest"
+        enable.auto.commit: "false"
+        session.timeout.ms: "30000"
+    
+    # 数据转换配置
+    transform:
+      field-mapping:
+        fix_id: "JSON_VALUE(payload, '$.fixId')"
+        wrong_id: "JSON_VALUE(payload, '$.wrongId')"
+        user_id: "JSON_VALUE(payload, '$.userId')"
+        subject: "JSON_VALUE(payload, '$.subject')"
+        question_id: "JSON_VALUE(payload, '$.questionId')"
+        pattern_id: "JSON_VALUE(payload, '$.patternId')"
+        chapter_id: "JSON_VALUE(payload, '$.chapterId')"
+      
+      type-conversion:
+        create_time: "CAST(JSON_VALUE(payload, '$.createTime') AS BIGINT)"
+        submit_time: "CAST(JSON_VALUE(payload, '$.submitTime') AS BIGINT)"
+        fix_result: "CAST(JSON_VALUE(payload, '$.fixResult') AS INT)"
+
+# 维表配置
+dim-tables:
+  # 知识点维表
+  - table-name: "tower_pattern"
+    table-alias: "pt"
+    connector: "jdbc"
+    connection-properties:
+      table-name: "tower_pattern"
+      url: "${mysql.tower.url:jdbc:mysql://localhost:3306/tower}"
+      username: "${mysql.tower.username:username}"
+      password: "${mysql.tower.password:password}"
+    
+    cache:
+      ttl: "30min"
+      max-rows: 100000
+      enable-missing-key-cache: false
+      max-retries: 3
+    
+    join-conditions:
+      - event-source: "wrongbook_events"
+        join-condition: "pt.id = JSON_VALUE(wrongbook_events.payload, '$.patternId')"
+        join-type: "LEFT"
+        required: false
+
+  # 教学类型-知识点映射表
+  - table-name: "tower_teaching_type_pt"
+    table-alias: "ttp"
+    connector: "jdbc"
+    connection-properties:
+      table-name: "tower_teaching_type_pt"
+      url: "${mysql.tower.url:jdbc:mysql://localhost:3306/tower}"
+      username: "${mysql.tower.username:username}"
+      password: "${mysql.tower.password:password}"
+    
+    cache:
+      ttl: "30min"
+      max-rows: 50000
+    
+    join-conditions:
+      - event-source: "wrongbook_events"
+        join-condition: "ttp.pt_id = JSON_VALUE(wrongbook_events.payload, '$.patternId')"
+        join-type: "LEFT"
+        additional-conditions: "ttp.is_delete = 0"
+
+  # 教学类型表
+  - table-name: "tower_teaching_type"
+    table-alias: "tt"
+    connector: "jdbc"
+    connection-properties:
+      table-name: "tower_teaching_type"
+      url: "${mysql.tower.url:jdbc:mysql://localhost:3306/tower}"
+      username: "${mysql.tower.username:username}"
+      password: "${mysql.tower.password:password}"
+    
+    cache:
+      ttl: "1hour"
+      max-rows: 20000
+    
+    join-conditions:
+      - event-source: "wrongbook_events"
+        join-condition: "tt.id = ttp.teaching_type_id"
+        join-type: "LEFT"
+        additional-conditions: "tt.is_delete = 0"
+
+# 输出配置
+outputs:
+  # 主要输出：错题宽表
+  - output-name: "wrongbook-wide-table"
+    output-type: "TABLE"
+    target-name: "dwd_wrong_record_wide_delta"
+    properties:
+      connector: "odps"
+      access-id: "${odps.access.id}"
+      access-key: "${odps.access.key}"
+      endpoint: "${odps.endpoint}"
+      project: "${odps.project}"
+      operation: "upsert"
+      enable-upsert: "true"
+      upsert-write-bucket-num: "16"
+    primary-key: ["id"]
+
+  # 可选输出：实时推送到Kafka（用于下游消费）
+  - output-name: "wrongbook-realtime-stream"
+    output-type: "KAFKA"
+    target-name: "wrongbook_wide_table_stream"
+    properties:
+      connector: "kafka"
+      topic: "wrongbook_wide_table_stream"
+      properties.bootstrap.servers: "${kafka.bootstrap.servers}"
+      format: "json"
+      sink.partitioner: "round-robin"
+
+# 处理策略配置
+processing-strategy:
+  processing-mode: "UNION"  # 错题本是单域处理，使用UNION模式
+  time-alignment-strategy: "EVENT_TIME"
+  
+  # 迟到数据处理
+  late-data:
+    allow-late-data: true
+    allowed-lateness: 300000  # 5分钟
+    late-data-handling: "SIDE_OUTPUT"
+  
+  # 状态管理
+  state:
+    state-backend: "rocksdb"
+    state-ttl: 86400000      # 1天
+    enable-state-compression: true
+
+# 数据质量配置
+data-quality:
+  enable-validation: true
+  
+  # 必需字段检查
+  required-fields:
+    - "payload.fixId"
+    - "payload.wrongId"
+    - "payload.userId"
+    - "payload.questionId"
+    - "payload.patternId"
+  
+  # 值范围检查
+  value-ranges:
+    fix_result: [0, 1]
+    subject: ["MATH", "ENGLISH", "CHINESE", "PHYSICS", "CHEMISTRY", "BIOLOGY", "AOSHU", "SCIENCE"]
+  
+  # 完整性阈值
+  completeness-threshold: 0.99
+  
+  # 业务规则检查
+  business-rules:
+    - "fix_result IN (0, 1) OR fix_result IS NULL"
+    - "LENGTH(user_id) > 0"
+    - "LENGTH(question_id) > 0"
+
+# 监控和告警配置
+monitoring:
+  # 业务指标
+  business-metrics:
+    - name: "wrongbook_events_processed_total"
+      type: "counter"
+      description: "处理的错题本事件总数"
+    
+    - name: "wrongbook_fix_success_rate"
+      type: "gauge"
+      description: "错题订正成功率"
+    
+    - name: "wrongbook_join_success_rate"
+      type: "gauge"
+      description: "维表JOIN成功率"
+    
+    - name: "wrongbook_processing_latency"
+      type: "histogram"
+      description: "处理延迟分布"
+  
+  # 告警规则
+  alerts:
+    - metric: "wrongbook_join_success_rate"
+      condition: "< 0.95"
+      severity: "WARNING"
+      description: "维表JOIN成功率过低"
+    
+    - metric: "wrongbook_processing_latency_p95"
+      condition: "> 300000"  # 5分钟
+      severity: "CRITICAL"
+      description: "处理延迟过高"
+    
+    - metric: "wrongbook_events_processed_total"
+      condition: "rate < 10"  # 每分钟少于10个事件
+      severity: "WARNING"
+      description: "事件处理量异常偏低"
+
+# 性能优化配置
+performance:
+  # 并行度配置
+  parallelism:
+    source: 4
+    process: 6
+    sink: 2
+  
+  # 内存配置
+  memory:
+    task-heap-size: "1024m"
+    task-off-heap-size: "512m"
+    managed-memory-fraction: 0.4
+  
+  # 网络配置
+  network:
+    buffer-timeout: 100
+    buffer-size: "32kb"
+    buffers-per-channel: 2
+
+# 开发和调试配置
+development:
+  # 本地开发模式
+  local-mode:
+    enable-web-ui: true
+    web-ui-port: 8081
+    enable-logging: true
+    log-level: "DEBUG"
+  
+  # 测试数据配置
+  test-data:
+    enable-mock-data: false
+    mock-data-rate: 100  # 每秒生成100条测试数据
+    mock-data-duration: 3600  # 生成1小时的测试数据
