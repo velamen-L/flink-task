@@ -100,11 +100,12 @@ graph TB
         S7 --> S9[部署建议]
     end
     
-    subgraph "外部系统集成"
-        E1[Flink集群] --> E2[作业部署]
-        E3[Kubernetes] --> E4[容器编排]
-        E5[监控系统] --> E6[性能监控]
-        E7[Git仓库] --> E8[版本控制]
+    subgraph "阿里云平台集成"
+        E1[VVR平台] --> E2[作业部署与管理]
+        E3[Data Catalog] --> E4[元数据管理]
+        E5[平台监控] --> E6[性能与告警]
+        E7[DataWorks] --> E8[数据开发集成]
+        E9[MCP服务] --> E10[数据验证服务]
     end
     
     U2 --> G1
@@ -116,9 +117,10 @@ graph TB
     A4 --> K5
     A6 --> K1
     S4 --> E1
-    S5 --> E3
+    S5 --> E1
     S8 --> E5
     S9 --> E7
+    A4 --> E9
 ```
 
 ### 2.2 架构分层说明
@@ -157,12 +159,12 @@ graph TB
 - **生命周期**: 文件的创建、更新、归档生命周期管理
 - **访问控制**: 基于角色的文件访问权限控制
 
-#### 外部系统集成
-与企业现有系统的集成：
-- **运行时集成**: 与Flink集群、Kubernetes的运行时集成
-- **监控集成**: 与企业监控和告警系统的集成
-- **开发集成**: 与Git、CI/CD系统的集成
-- **数据集成**: 与数据仓库、数据湖的集成
+#### 阿里云平台集成
+与阿里云Flink平台的深度集成：
+- **VVR平台集成**: 与阿里云实时计算Flink版(VVR)的原生集成
+- **元数据管理**: 集成阿里云Data Catalog服务进行元数据管理
+- **监控告警**: 使用VVR平台内置的监控和告警能力
+- **数据连接**: 与阿里云数据生态(MaxCompute、DataWorks、SLS等)的集成
 
 ### 2.3 核心组件详解
 
@@ -179,8 +181,8 @@ graph TB
 - **功能**: 多维度SQL质量验证和数据准确性检查
 - **输入**: 生成的SQL文件、原始需求文件
 - **输出**: 验证报告、质量评分、修复建议
-- **特性**: 语法检查、逻辑验证、性能评估、安全检查
-- **算法**: 基于规则和统计的综合评分算法
+- **特性**: VVR语法检查、逻辑验证、性能评估、安全检查
+- **云集成**: 支持阿里云MCP服务进行深度数据验证
 
 **intelligent-er-knowledge-base.mdc**
 - **功能**: ER图知识库的维护和冲突检测
@@ -336,9 +338,9 @@ sequenceDiagram
 
 **SQL标准性验证 (25%权重)**:
 - Flink SQL语法规范检查
-- 阿里云VVR兼容性验证
+- 阿里云VVR平台兼容性验证
+- VVR连接器规范检查
 - 命名规范和代码风格检查
-- 最佳实践合规性验证
 - 安全性风险评估
 
 **数据准确性验证 (35%权重)**:
@@ -794,68 +796,51 @@ WHERE
 -- ============================================================================
 ```
 
-**部署配置 (deploy-{domain}-v3.yaml)**:
+**VVR部署配置 (deploy-{domain}-v3.yaml)**:
 ```yaml
-# Kubernetes完整部署配置
+# 阿里云VVR平台部署配置
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {domain}-job-config
-  namespace: flink-jobs
 data:
-  job.properties: |
-    job.name={domain}-wide-table-v3
-    job.parallelism=8
-    execution.checkpointing.interval=30s
-    state.backend=rocksdb
-    
----
-apiVersion: apps/v1  
-kind: Deployment
-metadata:
-  name: {domain}-job
-  namespace: flink-jobs
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: {domain}-job
-  template:
+  # VVR作业配置
+  job.yaml: |
+    apiVersion: datastream.alibaba.com/v1alpha1
+    kind: FlinkDeployment
     metadata:
-      labels:
-        app: {domain}-job
+      name: {domain}-wide-table-v3
+      namespace: vvr-{workspace}
     spec:
-      containers:
-      - name: flink-job-manager
-        image: flink:1.18.0-scala_2.12-java17
-        resources:
-          requests:
-            memory: "2Gi"
-            cpu: "1000m"
-          limits:
-            memory: "4Gi" 
-            cpu: "2000m"
-            
----
-# HPA自动扩缩容
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: {domain}-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: {domain}-taskmanager
-  minReplicas: 2
-  maxReplicas: 8
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
+      # VVR平台托管的资源配置
+      flinkConfiguration:
+        jobmanager.memory.process.size: "2g"
+        taskmanager.memory.process.size: "4g"
+        taskmanager.numberOfTaskSlots: "4"
+        execution.checkpointing.interval: "30s"
+        state.backend: "rocksdb"
+        state.savepoints.dir: "oss://{bucket}/savepoints"
+        execution.checkpointing.externalized-checkpoint-retention: "RETAIN_ON_CANCELLATION"
+        
+      # VVR平台自动管理的监控配置
+      monitoring:
+        enabled: true
+        prometheus.enabled: true
+        grafana.enabled: true
+        
+      # 与阿里云服务集成
+      connectors:
+        kafka.security.protocol: "SASL_PLAINTEXT"
+        kafka.sasl.mechanism: "PLAIN"
+        maxcompute.project: "{project_name}"
+        sls.project: "{sls_project}"
+        
+      # 自动扩缩容(VVR平台托管)
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 8
+        targetCPUUtilizationPercentage: 70
 ```
 
 #### 5.2.2 质量报告文件
@@ -1122,29 +1107,25 @@ ext.aiWorkflowConfig = [
 
 ### 9.2 中期规划 (6-12个月)
 
-#### 智能化升级方向
-- **机器学习集成**: 
-  - 基于历史数据训练SQL优化模型
-  - 实现智能的性能参数推荐
-  - 自动识别数据质量问题和异常模式
-- **自适应生成**: 
-  - 根据运行时反馈调整生成策略
-  - 个性化的代码风格和配置偏好
-  - 智能的测试用例生成和覆盖分析
+#### 阿里云深度集成
+- **MCP服务集成**: 
+  - 接入阿里云实时计算MCP(Meta Compute Platform)服务
+  - 实现基于MCP的自动数据验证和质量监控
+  - 支持MCP Catalog的元数据自动同步和管理
+- **DataWorks集成**: 
+  - 与DataWorks数据开发平台深度集成
+  - 实现工作流的可视化配置和调度
+  - 支持数据血缘和影响分析
 
-#### 平台化发展策略
-- **微服务架构**: 
-  - 将AI Agent拆分为独立的微服务
-  - 支持分布式部署和横向扩展
-  - 实现服务的独立升级和版本管理
-- **API服务化**: 
-  - 提供RESTful API接口
-  - 支持第三方系统集成
-  - 实现工作流的远程调用和监控
-- **云原生改造**: 
-  - 支持Kubernetes原生部署
-  - 实现弹性伸缩和故障自愈
-  - 集成云服务生态(如阿里云、AWS等)
+#### 智能化升级方向
+- **VVR平台优化**: 
+  - 基于VVR平台的作业性能数据训练优化模型
+  - 实现智能的资源配置和参数调优
+  - 自动识别VVR作业的性能瓶颈和优化建议
+- **云原生AI服务**: 
+  - 利用阿里云PAI平台提供的AI能力
+  - 集成自然语言处理和代码生成模型
+  - 实现更智能的SQL生成和优化
 
 #### 生态建设规划
 - **插件机制**: 
@@ -1210,30 +1191,30 @@ graph LR
     D --> D3[云原生部署]
 ```
 
-#### 生态建设路径
+#### 阿里云集成发展路径
 ```mermaid
 timeline
-    title AI工作流生态发展时间线
+    title 阿里云Flink AI工作流发展时间线
     
-    2024 Q1-Q2 : 性能优化
-                : 功能扩展
-                : 用户体验提升
+    2024 Q1-Q2 : VVR平台适配优化
+                : 基础功能完善
+                : VVR兼容性提升
     
-    2024 Q3-Q4 : 智能化升级启动
-                : 平台化架构设计
-                : 插件机制开发
+    2024 Q3-Q4 : MCP服务集成调研
+                : Data Catalog接入
+                : 元数据管理优化
     
-    2025 Q1-Q2 : 微服务架构改造
-                : API服务上线
-                : 开发者生态建设
+    2025 Q1-Q2 : MCP服务深度集成
+                : 自动数据验证
+                : 质量监控增强
     
-    2025 Q3-Q4 : 多技术栈支持
-                : 企业级功能完善
-                : 行业解决方案
+    2025 Q3-Q4 : DataWorks平台集成
+                : 可视化配置界面
+                : 数据血缘分析
     
-    2026-2027  : 通用AI开发平台
-                : 行业标准制定
-                : 生态成熟发展
+    2026-2027  : 阿里云AI服务集成
+                : PAI平台能力接入
+                : 云原生AI工作流
 ```
 
 ### 9.5 商业价值预期
@@ -1273,11 +1254,12 @@ timeline
 - **存储**: SSD存储，最小50GB可用空间，推荐200GB+
 - **网络**: 稳定的互联网连接，支持AI Provider API调用
 
-#### 依赖组件
-- **Docker**: 20.0+ (用于容器化部署)
-- **Kubernetes**: 1.20+ (生产环境部署)
+#### 阿里云服务依赖
+- **VVR平台**: 阿里云实时计算Flink版
+- **Data Catalog**: 阿里云数据目录服务(可选)
+- **MCP服务**: Meta Compute Platform(中期集成)
+- **DataWorks**: 数据开发平台(可选集成)
 - **Git**: 2.30+ (版本控制)
-- **Node.js**: 16+ (可选，用于Web界面)
 
 ### 10.2 安装与配置
 
@@ -1340,26 +1322,28 @@ environment_checklist:
 
 ### 10.3 监控与诊断
 
-#### 系统监控指标
+#### 监控指标(VVR平台托管)
 ```yaml
 monitoring_metrics:
-  performance_metrics:
+  # AI工作流性能指标
+  workflow_metrics:
     - workflow_execution_time: "工作流执行时间"
     - sql_generation_time: "SQL生成耗时"
     - validation_time: "验证耗时"
     - er_update_time: "ER知识库更新耗时"
     
+  # 质量评估指标
   quality_metrics:
     - overall_quality_score: "综合质量评分"
     - validation_pass_rate: "验证通过率"
-    - conflict_detection_rate: "冲突检测准确率"
-    - code_coverage: "测试覆盖率"
+    - vvr_compatibility_score: "VVR兼容性评分"
     
-  resource_metrics:
-    - memory_usage: "内存使用率"
-    - cpu_usage: "CPU使用率"
-    - disk_io: "磁盘IO"
-    - network_io: "网络IO"
+  # VVR平台自动监控的作业指标
+  vvr_managed_metrics:
+    - job_throughput: "作业吞吐量(VVR平台监控)"
+    - checkpoint_duration: "检查点耗时(VVR平台监控)"
+    - backpressure: "反压情况(VVR平台监控)"
+    - resource_utilization: "资源利用率(VVR平台监控)"
 ```
 
 #### 日志管理
@@ -1429,18 +1413,19 @@ gradle validateFlinkSql --debug
 # 4. 检查ER图定义的完整性
 ```
 
-**4. 性能问题诊断**
+**4. VVR作业性能问题**
 ```bash
-# 问题: 工作流执行缓慢
-# 性能分析:
-gradle runAiWorkflow --profile
-# 查看性能报告
+# 问题: 生成的作业在VVR平台运行缓慢
+# VVR平台诊断:
+# 1. 在VVR控制台查看作业监控面板
+# 2. 检查Flink作业图的反压情况
+# 3. 查看检查点耗时和频率
 
 # 优化策略:
-# 1. 增加JVM内存: export GRADLE_OPTS="-Xmx4g"
-# 2. 使用SSD存储
-# 3. 优化网络连接
-# 4. 减少并发任务数量
+# 1. 通过AI工作流重新生成优化的SQL
+# 2. 调整并行度配置
+# 3. 优化维表缓存配置
+# 4. 使用VVR平台的自动调优建议
 ```
 
 #### 故障排查流程图
@@ -1532,26 +1517,51 @@ cache_configuration:
 
 ## 结语
 
-Flink AI工作流架构代表了大数据开发的下一代模式，通过AI Agent驱动的智能化开发流程，实现了从业务需求到生产部署的端到端自动化。这一架构不仅显著提升了开发效率，更通过严格的质量保证体系和知识库管理机制，确保了高质量的交付和可持续的发展。
+Flink AI工作流架构代表了基于阿里云平台的大数据开发新模式，通过AI Agent驱动的智能化开发流程，实现了从业务需求到VVR平台生产部署的端到端自动化。这一架构充分利用了阿里云生态的优势，不仅显著提升了开发效率，更通过与MCP、DataWorks等服务的深度集成，确保了企业级的质量保证和可持续发展。
 
 ### 核心价值总结
 
 **技术价值**:
-- 10倍+开发效率提升
-- 95%+代码质量保证  
-- 60%+维护成本降低
-- 端到端自动化流程
+- 10倍+开发效率提升(基于VVR平台托管)
+- 95%+代码质量保证(AI + MCP服务验证)
+- 60%+维护成本降低(平台自动化运维)
+- 端到端自动化流程(从需求到VVR部署)
+
+**平台价值**:
+- 充分利用阿里云VVR平台的托管能力
+- 深度集成MCP服务的数据验证和治理能力
+- 无缝对接DataWorks数据开发生态
+- 享受阿里云企业级的安全和合规保障
 
 **商业价值**:
-- 快速响应业务需求
-- 降低技术门槛和人力成本
-- 提升产品交付质量和速度
-- 建立可持续的技术竞争优势
+- 快速响应业务需求(基于云原生弹性)
+- 降低技术门槛和运维成本(平台托管)
+- 提升产品交付质量和速度(AI + 云服务)
+- 建立可持续的技术竞争优势(生态集成)
 
 **生态价值**:
-- 推动大数据开发的标准化
-- 建立AI驱动开发的最佳实践
-- 培养新一代的智能化开发人才
-- 促进整个行业的数字化转型
+- 推动基于阿里云的大数据开发标准化
+- 建立AI + 云原生的开发最佳实践
+- 培养云原生时代的智能化开发人才
+- 促进企业向云原生架构的数字化转型
 
-随着AI技术的不断发展和完善，这一架构将持续演进，为企业数字化转型和智能化发展提供更强大的技术支撑。我们相信，AI驱动的开发模式将成为未来软件开发的主流趋势，而Flink AI工作流架构正是这一趋势的先行者和实践者。
+### 发展展望
+
+随着阿里云MCP服务的成熟和AI技术的持续发展，这一架构将在以下方面持续演进：
+
+**短期(2024)**:
+- 完善VVR平台集成，优化性能和稳定性
+- 建立标准化的开发和部署流程
+- 构建完整的质量保证体系
+
+**中期(2025)**:
+- 深度集成MCP服务，实现智能化数据治理
+- 对接DataWorks平台，提供可视化开发体验
+- 建立完整的监控运维体系
+
+**长期(2026+)**:
+- 集成阿里云PAI等AI服务，提升智能化水平
+- 建立行业领先的云原生AI开发平台
+- 推动大数据开发的标准化和规范化
+
+我们相信，基于阿里云平台的AI驱动开发模式将成为企业数字化转型的重要推动力，而Flink AI工作流架构正是这一变革的先行者和实践者，为企业在云原生时代的智能化发展提供强有力的技术支撑。
