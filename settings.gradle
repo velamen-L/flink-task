@@ -1,0 +1,4 @@
+rootProject.name = 'flink-task'
+
+// 项目现在完全基于 AI Agent 和 Cursor 规则生成 Flink SQL
+// 不再依赖传统的 Gradle 插件方式

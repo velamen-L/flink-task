@@ -1,0 +1,200 @@
+// 使用Flink AI工作流插件的示例项目配置
+plugins {
+    id 'java'
+    id 'com.flink.ai.workflow' version '1.0.0'
+}
+
+// 基础项目配置
+group = 'com.example.flink'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Flink dependencies
+    implementation 'org.apache.flink:flink-streaming-java:1.18.0'
+    implementation 'org.apache.flink:flink-table-api-java-bridge:1.18.0'
+    
+    // 其他依赖...
+}
+
+// =============================================================================
+// Flink AI工作流插件配置
+// =============================================================================
+flinkAiWorkflow {
+    // 基础配置
+    workspaceDir = 'job'                    // 工作空间目录
+    aiProvider = 'cursor'                   // AI提供者: cursor, openai, azure
+    rulesDir = '.cursor/rules'              // AI规则文件目录
+    configDir = 'job/ai-config'             // 配置文件目录
+    enableWatch = false                     // 是否启用文件监控
+    enableDeploymentGeneration = true       // 是否自动生成部署配置
+    
+    // AI引擎配置
+    model = 'gpt-4'                         // AI模型
+    workflowTimeoutMinutes = 10             // 工作流超时时间（分钟）
+    maxRetries = 3                          // 最大重试次数
+    
+    // 质量控制配置
+    qualityGateMode = 'strict'              // 质量门控模式: strict, permissive, advisory
+    minQualityScore = 85                    // 最低质量评分
+    allowWarnings = true                    // 是否允许Warning级别问题
+    criticalIssuesThreshold = 0             // Critical问题容忍数量
+    
+    // 业务域配置
+    domains = ['wrongbook', 'user-stats']   // 包含的业务域
+    excludedDomains = []                    // 排除的业务域
+    
+    // 输出配置
+    outputDir = 'build/ai-workflow'         // 输出目录
+    generateDetailedReports = true          // 是否生成详细报告
+    reportFormat = 'markdown'               // 报告格式: markdown, html, json
+    enableBackup = true                     // 是否备份生成文件
+    
+    // ER知识库配置
+    knowledgeBaseDir = 'job/knowledge-base' // 知识库目录
+    conflictDetectionSensitivity = 'medium' // 冲突检测敏感度: low, medium, high
+    autoResolveCompatibleConflicts = true   // 自动解决兼容性冲突
+    erDiagramFormat = 'mermaid'             // ER图格式: mermaid, plantuml, both
+    
+    // 高级配置
+    enableParallelExecution = false         // 并行执行（实验性）
+    maxParallelTasks = 3                    // 最大并行任务数
+    enableCache = true                      // 启用缓存
+    cacheExpiryHours = 24                   // 缓存有效期
+    debugMode = false                       // 调试模式
+    logLevel = 'INFO'                       // 日志级别
+    
+    // AI配置（可选，根据provider不同）
+    aiConfig = [
+        'api_key': System.getenv('OPENAI_API_KEY'),
+        'base_url': 'https://api.openai.com/v1',
+        'timeout': '60'
+    ]
+}
+
+// =============================================================================
+// 任务配置和依赖关系
+// =============================================================================
+
+// 1. 完整的AI工作流任务
+// gradle runAiWorkflow
+// 执行完整的端到端工作流（SQL生成 → 验证 → ER知识库更新）
+
+// 2. 单独的阶段任务
+// gradle generateFlinkSql          - 仅执行SQL生成
+// gradle validateFlinkSql          - 仅执行数据验证
+// gradle updateErKnowledgeBase     - 仅执行ER知识库更新
+
+// 3. 辅助任务
+// gradle initAiWorkflow            - 初始化AI工作流环境
+// gradle createFlinkDomain         - 创建新业务域脚手架
+// gradle generateQualityReport     - 生成项目质量报告
+// gradle generateDeploymentConfig  - 生成部署配置
+
+// 4. 监控和维护任务
+// gradle watchRequestFiles         - 监控文件变更，自动触发工作流
+// gradle checkKnowledgeBaseConsistency - 检查知识库一致性
+
+// 自定义任务示例：集成到构建流程中
+build.dependsOn 'generateFlinkSql'
+
+// 部署前验证
+task deploymentValidation {
+    dependsOn 'validateFlinkSql'
+    
+    doLast {
+        println "✅ 部署前验证完成"
+    }
+}
+
+// 生产环境部署配置
+task generateProdConfig {
+    dependsOn 'generateDeploymentConfig'
+    
+    doLast {
+        // 可以在这里添加生产环境特定的配置调整
+        println "🚀 生产环境配置已生成"
+    }
+}
+
+// =============================================================================
+// 环境特定配置
+// =============================================================================
+
+// 开发环境配置
+if (project.hasProperty('dev')) {
+    flinkAiWorkflow {
+        qualityGateMode = 'permissive'
+        debugMode = true
+        logLevel = 'DEBUG'
+        workflowTimeoutMinutes = 20  // 开发环境允许更长的超时时间
+    }
+}
+
+// 测试环境配置
+if (project.hasProperty('test')) {
+    flinkAiWorkflow {
+        qualityGateMode = 'strict'
+        generateDetailedReports = true
+        enableBackup = false  // 测试环境不需要备份
+    }
+}
+
+// 生产环境配置
+if (project.hasProperty('prod')) {
+    flinkAiWorkflow {
+        qualityGateMode = 'strict'
+        minQualityScore = 95  // 生产环境要求更高的质量标准
+        criticalIssuesThreshold = 0
+        allowWarnings = false  // 生产环境不允许警告
+        enableBackup = true
+        enableCache = false  // 生产环境每次重新生成
+    }
+}
+
+// =============================================================================
+// 自定义任务示例
+// =============================================================================
+
+// 批量处理多个业务域
+task processAllDomains {
+    dependsOn 'runAiWorkflow'
+    
+    doLast {
+        def outputDir = file(flinkAiWorkflow.outputDir.get())
+        if (outputDir.exists()) {
+            outputDir.listFiles().each { domainDir ->
+                if (domainDir.isDirectory()) {
+                    println "📊 处理完成业务域: ${domainDir.name}"
+                }
+            }
+        }
+    }
+}
+
+// 生成项目报告
+task generateProjectReport {
+    dependsOn 'generateQualityReport'
+    
+    doLast {
+        println """
+        🎯 项目处理完成！
+        
+        工作空间: ${flinkAiWorkflow.workspaceDir.get()}
+        输出目录: ${flinkAiWorkflow.outputDir.get()}
+        质量标准: ${flinkAiWorkflow.minQualityScore.get()}分
+        
+        查看详细报告: ${flinkAiWorkflow.outputDir.get()}/overall-report.md
+        """
+    }
+}
+
+// 清理生成的文件
+task cleanAiOutput(type: Delete) {
+    delete flinkAiWorkflow.outputDir.get()
+}
+
+clean.dependsOn cleanAiOutput

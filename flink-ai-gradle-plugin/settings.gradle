@@ -1,0 +1,10 @@
+rootProject.name = 'flink-ai-gradle-plugin'
+
+// Plugin development settings
+gradleEnterprise {
+    buildScan {
+        termsOfServiceUrl = 'https://gradle.com/terms-of-service'
+        termsOfServiceAgree = 'yes'
+        publishAlways()
+    }
+}

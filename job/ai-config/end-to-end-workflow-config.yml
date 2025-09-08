@@ -1,0 +1,387 @@
+# =============================================================================
+# 端到端工作流配置文件 v1.0
+# 用于配置 SQL生成 → 数据验证 → ER知识库更新 的完整工作流
+# =============================================================================
+
+# 工作流全局配置
+workflow_config:
+  name: "end_to_end_flink_sql_workflow"
+  version: "1.0"
+  description: "从request文件到SQL生成、验证、知识库更新的完整流程"
+  
+  # 执行模式
+  execution_mode: "sequential"  # sequential | parallel_where_possible
+  quality_gate_enforcement: "strict"  # strict | permissive | advisory
+  
+  # 超时设置
+  timeouts:
+    total_workflow: "30 minutes"
+    phase_1_sql_generation: "5 minutes"
+    phase_2_data_validation: "10 minutes"
+    phase_3_er_kb_update: "8 minutes"
+    
+  # 重试策略
+  retry_policy:
+    max_retries: 3
+    retry_delay: "30 seconds"
+    exponential_backoff: true
+
+# 阶段1：SQL生成配置
+phase_1_sql_generation:
+  enabled: true
+  rule_file: ".cursor/rules/intelligent-sql-job-generator.mdc"
+  
+  # 输入配置
+  inputs:
+    request_file_pattern: "job/{domain}/{domain}-request-v3.md"
+    required_sections: ["job_info", "field_mapping", "join_relationships"]
+    
+  # 输出配置
+  outputs:
+    sql_file: "job/{domain}/sql/{domain}_wide_table_v3.sql"
+    deployment_config: "job/{domain}/deployment/deploy-{domain}-v3.yaml"
+    quality_check_sql: "job/{domain}/validation/data-quality-check-v3.sql"
+    documentation: "job/{domain}/docs/README-AI-Generated-v3.md"
+    
+  # 质量门控
+  quality_gates:
+    syntax_validation:
+      enabled: true
+      requirement: "SQL语法必须正确"
+      
+    logic_validation:
+      enabled: true
+      requirement: "业务逻辑映射完整"
+      
+    performance_validation:
+      enabled: true
+      requirement: "包含性能优化建议"
+      
+  # 成功标准
+  success_criteria:
+    - "SQL文件成功生成"
+    - "文件大小 > 1KB"
+    - "包含INSERT INTO语句"
+    - "包含JOIN关联逻辑"
+    
+  # 失败处理
+  failure_handling:
+    action: "retry_with_fallback"
+    fallback_template: "job/flink-sql-request-template-v3.md"
+    escalation_threshold: 3
+
+# 阶段2：数据验证配置
+phase_2_data_validation:
+  enabled: true
+  rule_files:
+    - ".cursor/rules/intelligent-validation-workflow.mdc"
+    - ".cursor/rules/flink-sql-validator.mdc"
+    - ".cursor/rules/flink-sql-data-validator.mdc"
+    
+  # 输入配置
+  inputs:
+    sql_file: "job/{domain}/sql/{domain}_wide_table_v3.sql"
+    request_file: "job/{domain}/{domain}-request-v3.md"
+    quality_check_sql: "job/{domain}/validation/data-quality-check-v3.sql"
+    
+  # 验证维度配置
+  validation_dimensions:
+    sql_standardness:
+      enabled: true
+      weight: 0.25
+      min_score: 90
+      
+    data_accuracy:
+      enabled: true
+      weight: 0.35
+      min_score: 95
+      
+    performance:
+      enabled: true
+      weight: 0.20
+      min_score: 80
+      
+    business_compliance:
+      enabled: true
+      weight: 0.20
+      min_score: 85
+      
+  # 输出配置
+  outputs:
+    validation_report: "job/{domain}/validation/validation-report-{domain}-v3.md"
+    test_data: "job/{domain}/validation/test-data-{domain}-v3.sql"
+    performance_benchmark: "job/{domain}/validation/performance-benchmark-{domain}-v3.sql"
+    
+  # 质量门控
+  quality_gates:
+    overall_score:
+      threshold: 85
+      requirement: "综合评分必须 >= 85分"
+      
+    critical_issues:
+      threshold: 0
+      requirement: "Critical级别问题必须为0"
+      
+    data_consistency:
+      threshold: 99
+      requirement: "数据一致性 >= 99%"
+      
+  # 成功标准
+  success_criteria:
+    - "综合评分 >= 85分"
+    - "Critical问题 = 0个"
+    - "数据一致性验证通过"
+    - "验证报告成功生成"
+    
+  # 失败处理
+  failure_handling:
+    critical_issues: "stop_workflow"
+    warning_issues: "continue_with_warning"
+    score_below_threshold: "generate_improvement_suggestions"
+
+# 阶段3：ER知识库更新配置
+phase_3_er_kb_update:
+  enabled: true
+  rule_file: ".cursor/rules/intelligent-er-knowledge-base.mdc"
+  
+  # 输入配置
+  inputs:
+    request_file: "job/{domain}/{domain}-request-v3.md"
+    validation_results: "job/{domain}/validation/validation-report-{domain}-v3.md"
+    
+  # 冲突检测配置
+  conflict_detection:
+    enabled: true
+    sensitivity: "high"  # low | medium | high
+    auto_resolution: false
+    
+    # 冲突类型配置
+    conflict_types:
+      field_type_mismatch:
+        severity: "HIGH"
+        auto_resolve: false
+        
+      join_condition_mismatch:
+        severity: "MEDIUM"
+        auto_resolve: true
+        
+      missing_required_field:
+        severity: "HIGH"
+        auto_resolve: false
+        
+      business_rule_contradiction:
+        severity: "MEDIUM"
+        auto_resolve: false
+        
+  # 输出配置
+  outputs:
+    er_diagram: "job/knowledge-base/er-schemas/domains/{domain}/generated-er-diagram-v3.md"
+    source_payload: "job/knowledge-base/er-schemas/domains/{domain}/source-payload.md"
+    dimension_tables: "job/knowledge-base/er-schemas/domains/{domain}/dimension-tables.md"
+    relationships: "job/knowledge-base/er-schemas/domains/{domain}/relationships.md"
+    conflict_report: "job/knowledge-base/conflict-reports/{domain}_conflict_{timestamp}.md"
+    
+  # 质量门控
+  quality_gates:
+    conflict_resolution:
+      requirement: "所有Critical冲突必须解决"
+      
+    consistency_check:
+      requirement: "跨域一致性检查通过"
+      
+    completeness_check:
+      requirement: "ER图完整性验证通过"
+      
+  # 成功标准
+  success_criteria:
+    - "知识库更新成功 OR 冲突报告生成"
+    - "ER图文件成功生成"
+    - "一致性检查通过"
+    - "元数据正确更新"
+    
+  # 失败处理
+  failure_handling:
+    conflicts_detected: "pause_for_manual_resolution"
+    parsing_errors: "escalate_to_manual"
+    consistency_failures: "trigger_global_consistency_check"
+
+# 工作流监控配置
+monitoring:
+  enabled: true
+  
+  # 指标收集
+  metrics:
+    execution_time:
+      enabled: true
+      granularity: "phase_level"
+      
+    success_rate:
+      enabled: true
+      window: "24 hours"
+      
+    error_rate:
+      enabled: true
+      categorization: "by_phase_and_type"
+      
+    resource_usage:
+      enabled: true
+      metrics: ["cpu", "memory", "storage"]
+      
+  # 日志配置
+  logging:
+    level: "INFO"  # DEBUG | INFO | WARN | ERROR
+    format: "structured"  # plain | structured
+    destinations: ["console", "file"]
+    file_path: "logs/end-to-end-workflow.log"
+    max_file_size: "100MB"
+    max_files: 10
+    
+  # 告警配置
+  alerting:
+    enabled: true
+    
+    rules:
+      workflow_failure:
+        condition: "workflow_status == 'FAILED'"
+        severity: "critical"
+        notification: ["email", "slack"]
+        
+      quality_gate_failure:
+        condition: "quality_gate_passed == false"
+        severity: "warning"
+        notification: ["slack"]
+        
+      execution_time_exceeded:
+        condition: "execution_time > timeout_threshold * 1.5"
+        severity: "warning"
+        notification: ["slack"]
+        
+      conflict_detected:
+        condition: "conflicts_count > 0"
+        severity: "info"
+        notification: ["email"]
+
+# 状态管理配置
+state_management:
+  enabled: true
+  
+  # 状态持久化
+  persistence:
+    enabled: true
+    storage_type: "file"  # file | database | redis
+    file_path: "job/{domain}/.workflow/state.json"
+    backup_enabled: true
+    backup_retention: "7 days"
+    
+  # 检查点配置
+  checkpoints:
+    enabled: true
+    frequency: "after_each_phase"
+    include_intermediate_results: true
+    
+  # 恢复配置
+  recovery:
+    enabled: true
+    strategy: "resume_from_last_checkpoint"
+    max_recovery_attempts: 3
+
+# 并发和资源管理
+resource_management:
+  # 并发控制
+  concurrency:
+    max_parallel_workflows: 3
+    max_parallel_phases: 1  # 当前设计为顺序执行
+    
+  # 资源限制
+  limits:
+    max_memory: "2GB"
+    max_cpu: "2 cores"
+    max_disk: "10GB"
+    max_file_size: "100MB"
+    
+  # 清理策略
+  cleanup:
+    enabled: true
+    temp_files_retention: "1 hour"
+    failed_workflow_retention: "24 hours"
+    successful_workflow_retention: "7 days"
+
+# 安全配置
+security:
+  # 访问控制
+  access_control:
+    enabled: true
+    require_authentication: false  # 开发环境设置
+    allowed_users: ["*"]  # 生产环境应限制具体用户
+    
+  # 数据保护
+  data_protection:
+    encrypt_state_files: false  # 生产环境建议启用
+    mask_sensitive_data: true
+    audit_logging: true
+    
+  # 文件权限
+  file_permissions:
+    workflow_files: "0644"
+    state_files: "0600"
+    log_files: "0644"
+
+# 环境特定配置
+environments:
+  development:
+    quality_gate_enforcement: "permissive"
+    timeout_multiplier: 2.0
+    detailed_logging: true
+    auto_cleanup: false
+    
+  testing:
+    quality_gate_enforcement: "strict"
+    timeout_multiplier: 1.5
+    mock_external_dependencies: true
+    generate_test_reports: true
+    
+  production:
+    quality_gate_enforcement: "strict"
+    timeout_multiplier: 1.0
+    enable_all_monitoring: true
+    backup_all_artifacts: true
+
+# 集成配置
+integrations:
+  # CI/CD集成
+  cicd:
+    enabled: false  # 未来扩展
+    trigger_on_commit: false
+    webhook_url: ""
+    
+  # 外部工具集成
+  external_tools:
+    slack:
+      enabled: false
+      webhook_url: ""
+      
+    email:
+      enabled: false
+      smtp_server: ""
+      
+    monitoring_dashboard:
+      enabled: false
+      grafana_url: ""
+
+# 调试和开发配置
+debug:
+  enabled: true
+  
+  # 调试选项
+  options:
+    preserve_intermediate_files: true
+    verbose_error_messages: true
+    dump_state_on_failure: true
+    enable_performance_profiling: false
+    
+  # 测试模式
+  test_mode:
+    enabled: false
+    mock_ai_responses: false
+    simulate_failures: false
+    dry_run: false

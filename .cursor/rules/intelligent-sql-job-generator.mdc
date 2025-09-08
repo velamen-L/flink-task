@@ -96,101 +96,140 @@ alwaysApply: false
 
 <examples>
 示例1：BusinessEvent事件流解析
-```markdown
-## 源表配置
-### BusinessEvent标准事件流
-- **源表名**: BusinessEvent (统一事件流表)
-- **事件过滤**: domain = 'wrongbook' AND type = 'wrongbook_fix'
-- **Payload结构**: WrongbookFixPayload
+```yaml
+# 源表配置示例
+job_info:
+  name: "错题本修正记录实时宽表"
+  domain: "wrongbook"
+  event_type: "fix"
 
-**WrongbookFixPayload数据结构**:
-{
-  "fix_id": "fix_123456",
-  "wrong_id": "wrong_789012",
-  "user_id": "user_345678",
-  "fix_result": 1,
-  "submit_time": 1703123456789,
-  "is_delete": 0
-}
+# BusinessEvent事件流配置
+source_config:
+  table_name: "BusinessEvent"
+  filter_condition: "domain = 'wrongbook' AND type = 'wrongbook_fix'"
+  payload_structure: "WrongbookFixPayload"
+
+# Payload结构示例
+payload_example:
+  id: "fix_123456"
+  wrong_id: "wrong_789012" 
+  user_id: "user_345678"
+  subject: "MATH"
+  pattern_id: "pattern_456"
+  fix_result: 1
+  submit_time: 1703123456789
+  is_delete: 0
 ```
 
 对应SQL生成：
 ```sql
 -- BusinessEvent标准事件流处理
--- AI自动将payload.field转换为JSON_VALUE函数
+-- AI自动将payload字段转换为JSON_VALUE函数
 FROM BusinessEvent be
 WHERE be.domain = 'wrongbook' 
   AND be.type = 'wrongbook_fix'
-  -- 注意：payload.is_delete会自动转换为JSON_VALUE(be.payload, '$.is_delete') = '0'
+  -- payload字段自动转换：payload.is_delete → JSON_VALUE(be.payload, '$.is_delete') = '0'
 ```
 
 示例2：维表关联配置（智能JOIN策略）
-```markdown
-## 维表配置
-### 维表1: wrong_question_record
-- **关联条件**: wqr.id = payload.wrongId  (AI会转换为JSON_VALUE)
-- **过滤条件**: wqr.is_delete = 0
-- **别名**: wqr
-
-**维表结构**:
-CREATE TABLE wrong_question_record (
-  `id` STRING NOT NULL,
-  `user_id` STRING,
-  `pattern_id` STRING,
-  `is_delete` BOOLEAN,
-  -- 更多字段...
-  PRIMARY KEY (id) NOT ENFORCED
-) WITH ('connector' = 'jdbc', 'lookup.cache.ttl' = '10 min', ...)
+```yaml
+# 维表配置示例
+dimension_tables:
+  tower_pattern:
+    alias: "pt"
+    join_condition: "payload.pattern_id = pt.id"
+    filter_condition: null
+    structure:
+      primary_key: "id"
+      business_fields: ["name", "type", "subject", "difficulty"]
+      connector: "jdbc"
+      cache_config:
+        max_rows: "100000"
+        ttl: "30 min"
+  
+  tower_teaching_type_pt:
+    alias: "ttp"
+    join_condition: "pt.id = ttp.pt_id"
+    filter_condition: "ttp.is_delete = 0"
+    structure:
+      primary_key: "id"
+      foreign_keys: ["teaching_type_id", "pt_id"]
+      connector: "jdbc"
 ```
 
 对应SQL生成：
 ```sql
 -- AI自动选择LEFT JOIN，并应用FOR SYSTEM_TIME AS OF PROCTIME()
--- payload.wrongId自动转换为JSON_VALUE(be.payload, '$.wrongId')
-LEFT JOIN wrong_question_record FOR SYSTEM_TIME AS OF PROCTIME() wqr 
-    ON wqr.id = JSON_VALUE(be.payload, '$.wrongId')
-    AND wqr.is_delete = 0
+-- payload字段自动转换为JSON_VALUE函数
+LEFT JOIN tower_pattern FOR SYSTEM_TIME AS OF PROCTIME() pt 
+    ON pt.id = JSON_VALUE(be.payload, '$.pattern_id')
+LEFT JOIN tower_teaching_type_pt FOR SYSTEM_TIME AS OF PROCTIME() ttp 
+    ON ttp.pt_id = pt.id 
+    AND ttp.is_delete = 0
 ```
 
 示例3：字段转换配置（基于payload和表结构）
-```markdown
-## 字段映射配置
-### 基础字段
-- `id`: payload.fixId - 从payload提取订正ID (AI会自动CAST类型)
-- `wrong_id`: wqr.id - 关联的错题记录ID
-- `user_id`: wqr.user_id - 维表中的用户ID
-
-### 转换字段
-- `subject_name`: 科目名称中文转换
-  - 基于wqr.subject字段进行CASE WHEN转换
-  - 'ENGLISH' -> '英语', 'MATH' -> '数学' 等
-
-### 时间字段
-- `collect_time`: TO_TIMESTAMP_LTZ(wqr.create_time, 0)
-- `fix_time`: TO_TIMESTAMP_LTZ(payload.submitTime) - AI会转换为JSON_VALUE
+```yaml
+# 字段映射配置示例
+field_mapping:
+  # 从payload映射的字段 - AI自动转换为JSON_VALUE
+  id: "CAST(payload.id AS BIGINT)"
+  wrong_id: "payload.wrong_id"
+  user_id: "payload.user_id"
+  subject: "payload.subject"
+  question_id: "payload.question_id"
+  pattern_id: "payload.pattern_id"
+  fix_id: "payload.id"
+  fix_result: "payload.result"
+  
+  # 从维表映射的字段  
+  pattern_name: "pt.name"
+  teaching_type_id: "CAST(tt.id AS STRING)"
+  teaching_type_name: "tt.teaching_type_name"
+  
+  # 计算字段 - 复杂的CASE WHEN表达式
+  subject_name: |
+    CASE payload.subject
+        WHEN 'ENGLISH' THEN '英语'
+        WHEN 'BIOLOGY' THEN '生物'
+        WHEN 'math' THEN '数学'
+        WHEN 'MATH' THEN '数学'
+        ELSE ''
+    END
+  
+  # 时间字段转换
+  collect_time: "TO_TIMESTAMP_LTZ(payload.create_time, 0)"
+  fix_time: "TO_TIMESTAMP_LTZ(payload.submit_time, 0)"
+  
+  # 状态描述字段
+  fix_result_desc: |
+    CASE payload.result
+        WHEN 1 THEN '订正'
+        WHEN 0 THEN '未订正'
+        ELSE ''
+    END
 ```
 
 对应SQL生成：
 ```sql
--- AI自动将payload.field转换为JSON_VALUE并处理类型转换
+-- AI自动将payload字段转换为JSON_VALUE并处理类型转换
 SELECT 
-  CAST(JSON_VALUE(be.payload, '$.fixId') AS BIGINT) AS id,
-  wqr.id AS wrong_id,
-  wqr.user_id,
-  wqr.subject,
-  CASE wqr.subject
+  CAST(JSON_VALUE(be.payload, '$.id') AS BIGINT) AS id,
+  JSON_VALUE(be.payload, '$.wrong_id') AS wrong_id,
+  JSON_VALUE(be.payload, '$.user_id') AS user_id,
+  JSON_VALUE(be.payload, '$.subject') AS subject,
+  CASE JSON_VALUE(be.payload, '$.subject')
     WHEN 'ENGLISH' THEN '英语'
     WHEN 'BIOLOGY' THEN '生物'
+    WHEN 'math' THEN '数学'
     WHEN 'MATH' THEN '数学'
-    WHEN 'PHYSICS' THEN '物理'
-    WHEN 'CHEMISTRY' THEN '化学'
-    WHEN 'AOSHU' THEN '数学思维'
-    WHEN 'SCIENCE' THEN '科学'
-    WHEN 'CHINESE' THEN '语文'
     ELSE ''
   END AS subject_name,
-  TO_TIMESTAMP_LTZ(wqr.create_time, 0) AS collect_time,
-  TO_TIMESTAMP_LTZ(JSON_VALUE(be.payload, '$.submitTime'), 0) AS fix_time
+  pt.name AS pattern_name,
+  CAST(tt.id AS STRING) AS teaching_type_id,
+  tt.teaching_type_name,
+  TO_TIMESTAMP_LTZ(JSON_VALUE(be.payload, '$.create_time'), 0) AS collect_time,
+  TO_TIMESTAMP_LTZ(JSON_VALUE(be.payload, '$.submit_time'), 0) AS fix_time
 ```
 
 示例4：完整SQL作业生成

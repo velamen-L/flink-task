@@ -1,0 +1,265 @@
+# =============================================================================
+# Flink SQL 智能验证配置文件 v3.0
+# 用于配置 AI Agent 验证工作流的各项参数和阈值
+# =============================================================================
+
+# 验证工作流配置
+validation_workflow:
+  version: "3.0"
+  enabled: true
+  mode: "comprehensive"  # basic | comprehensive | performance_focused
+  
+  # AI Agent 配置
+  ai_agent:
+    model: "gpt-4-turbo"
+    temperature: 0.1
+    max_tokens: 4000
+    rules_files:
+      - ".cursor/rules/flink-sql-validator.mdc"
+      - ".cursor/rules/flink-sql-data-validator.mdc" 
+      - ".cursor/rules/intelligent-validation-workflow.mdc"
+
+# SQL标准性验证配置
+sql_validation:
+  enabled: true
+  
+  # 语法检查
+  syntax_check:
+    enabled: true
+    flink_version: "1.17.1"
+    vvr_compatibility: true
+    strict_mode: false
+    
+  # 逻辑一致性检查
+  logic_check:
+    enabled: true
+    table_schema_validation: true
+    field_mapping_validation: true
+    join_logic_validation: true
+    data_type_validation: true
+    
+  # 性能分析
+  performance_analysis:
+    enabled: true
+    execution_plan_analysis: true
+    join_strategy_analysis: true
+    resource_estimation: true
+    optimization_suggestions: true
+
+# 数据准确性验证配置  
+data_validation:
+  enabled: true
+  
+  # 功能正确性验证
+  functional_validation:
+    enabled: true
+    field_transformation_check: true
+    business_rule_check: true
+    time_processing_check: true
+    json_parsing_check: true
+    
+  # 数据一致性验证
+  consistency_validation:
+    enabled: true
+    record_count_check: true
+    business_metrics_check: true
+    join_completeness_check: true
+    data_completeness_check: true
+    
+  # 端到端验证
+  e2e_validation:
+    enabled: true
+    full_pipeline_test: true
+    exception_handling_test: true
+    boundary_condition_test: true
+    concurrency_test: false  # 可选，需要大量资源
+
+# 质量阈值配置
+quality_thresholds:
+  # SQL标准性阈值
+  sql_standardness:
+    syntax_score_min: 95
+    logic_score_min: 90
+    performance_score_min: 80
+    
+  # 数据准确性阈值
+  data_accuracy:
+    record_consistency_min: 99.5  # 记录数一致性 >= 99.5%
+    business_metrics_accuracy_min: 99.0  # 业务指标准确性 >= 99%
+    join_success_rate_min: 95.0  # 维表关联成功率 >= 95%
+    data_completeness_min: 98.0  # 数据完整性 >= 98%
+    
+  # 性能阈值
+  performance:
+    processing_latency_max: 5.0  # 最大处理延迟 5秒
+    throughput_min: 1000  # 最小吞吐量 1000条/秒
+    resource_utilization_max: 80.0  # 最大资源利用率 80%
+    
+  # 业务合规性阈值
+  business_compliance:
+    business_rule_coverage_min: 90.0  # 业务规则覆盖率 >= 90%
+    exception_handling_coverage_min: 85.0  # 异常处理覆盖率 >= 85%
+
+# 上线决策配置
+deployment_decision:
+  # 评分权重
+  score_weights:
+    sql_standardness: 0.25  # SQL标准性权重 25%
+    data_accuracy: 0.35     # 数据准确性权重 35%
+    performance: 0.20       # 性能表现权重 20%
+    business_compliance: 0.20  # 业务合规性权重 20%
+    
+  # 上线门槛
+  deployment_thresholds:
+    production_ready: 95    # 生产环境部署门槛
+    test_ready: 85          # 测试环境部署门槛
+    development_ready: 70   # 开发环境部署门槛
+    blocked: 70             # 低于此分数禁止部署
+
+# 测试数据生成配置
+test_data_generation:
+  enabled: true
+  
+  # 正常场景测试数据
+  normal_scenarios:
+    record_count: 1000
+    time_range_hours: 24
+    subject_distribution:
+      MATH: 30%
+      ENGLISH: 25% 
+      CHINESE: 20%
+      PHYSICS: 15%
+      CHEMISTRY: 10%
+      
+  # 边界条件测试数据
+  boundary_scenarios:
+    null_value_tests: true
+    empty_string_tests: true
+    extreme_value_tests: true
+    invalid_format_tests: true
+    
+  # 异常场景测试数据
+  exception_scenarios:
+    missing_fields: true
+    invalid_json: true
+    future_timestamps: true
+    duplicate_records: true
+
+# 监控告警配置
+monitoring_alerts:
+  enabled: true
+  
+  # 数据质量告警
+  data_quality_alerts:
+    completeness_threshold: 95.0
+    accuracy_threshold: 99.0
+    join_rate_threshold: 90.0
+    latency_threshold: 300  # 秒
+    
+  # 告警级别
+  alert_levels:
+    critical: 
+      conditions: ["completeness < 90", "accuracy < 95"]
+      notification: ["email", "slack", "pagerduty"]
+    warning:
+      conditions: ["completeness < 95", "accuracy < 99", "join_rate < 90"]
+      notification: ["email", "slack"]
+    info:
+      conditions: ["latency > 180"]
+      notification: ["slack"]
+
+# 报告生成配置
+report_generation:
+  enabled: true
+  
+  # 报告格式
+  output_formats: ["markdown", "html", "json"]
+  template_file: "job/validation-report-template.md"
+  
+  # 报告内容
+  include_sections:
+    validation_overview: true
+    sql_validation_results: true
+    data_validation_results: true
+    test_cases: true
+    issue_summary: true
+    fix_recommendations: true
+    quality_scoring: true
+    monitoring_config: true
+    
+  # 输出配置
+  output_directory: "validation-reports"
+  filename_pattern: "{business_domain}_validation_report_{timestamp}"
+  
+# 持续集成配置
+ci_integration:
+  enabled: true
+  
+  # 触发条件
+  triggers:
+    on_sql_change: true
+    on_request_change: true
+    on_schedule: "0 2 * * *"  # 每天凌晨2点
+    
+  # 集成方式
+  integration_type: "webhook"  # webhook | jenkins | github_actions
+  webhook_url: "https://your-ci-system.com/webhook"
+  
+  # 失败处理
+  failure_handling:
+    block_deployment: true
+    notify_developers: true
+    create_issue: true
+
+# 环境配置
+environments:
+  development:
+    validation_mode: "basic"
+    quality_threshold: 70
+    skip_performance_tests: true
+    
+  testing:
+    validation_mode: "comprehensive"
+    quality_threshold: 85
+    skip_performance_tests: false
+    
+  production:
+    validation_mode: "comprehensive"
+    quality_threshold: 95
+    skip_performance_tests: false
+    enable_monitoring: true
+
+# 业务域特定配置
+business_domains:
+  wrongbook:
+    specific_validations:
+      - "subject_conversion_validation"
+      - "fix_status_validation"
+      - "time_sequence_validation"
+    custom_thresholds:
+      pattern_join_rate_min: 90.0
+      teaching_type_join_rate_min: 85.0
+      
+  user_daily_stats:
+    specific_validations:
+      - "user_behavior_validation"
+      - "daily_aggregation_validation"
+      - "metric_calculation_validation"
+    custom_thresholds:
+      user_coverage_min: 95.0
+      metric_accuracy_min: 99.5
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG | INFO | WARN | ERROR
+  output: ["console", "file"]
+  file_path: "logs/validation.log"
+  max_file_size: "100MB"
+  max_backup_files: 10
+  
+# 缓存配置
+cache:
+  enabled: true
+  validation_results_ttl: 3600  # 验证结果缓存1小时
+  test_data_ttl: 7200  # 测试数据缓存2小时
+  schema_cache_ttl: 86400  # 表结构缓存1天

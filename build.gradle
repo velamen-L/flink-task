@@ -1,7 +1,6 @@
 plugins {
     id 'java'
     id 'maven-publish'
-    id 'com.flink.ai.generator'
 }
 
 group = 'com.flink.realtime'
@@ -44,75 +43,320 @@ dependencies {
     testImplementation 'org.apache.flink:flink-test-utils:1.18.0'
 }
 
-// 配置Flink AI Generator插件
-flinkAiGenerator {
-    // 默认请求文件路径
-    requestFile = file('job/wrongbook/flink-sql-request-v3.md')
-    
-    // 输出目录
-    outputDir = layout.buildDirectory.dir('flink-ai-output')
-    
-    // ER知识库目录
-    knowledgeBaseDir = file('er-knowledge-base')
-    
-    // 业务域
-    domain = 'wrongbook'
-    
-    // 启用详细日志
-    verbose = true
-    
-    // 不跳过验证
-    skipValidation = false
-    
-    // 不强制更新ER（有冲突时提示）
-    forceERUpdate = false
-}
+// =============================================================================
+// AI工作流任务配置
+// =============================================================================
 
-// 自定义任务：快速生成wrongbook域的Flink SQL
-task generateWrongbookFlinkSql(type: com.flink.ai.FlinkAiWorkflowTask) {
-    group = 'flink-ai'
-    description = 'Generate Flink SQL for wrongbook domain'
-    
-    requestFile = file('job/wrongbook/flink-sql-request-v3.md')
-    outputDir = layout.buildDirectory.dir('flink-ai-output/wrongbook')
-    knowledgeBaseDir = file('er-knowledge-base')
-    domain = 'wrongbook'
-}
+// AI工作流配置
+ext.aiWorkflowConfig = [
+    workspaceDir: 'job',
+    aiProvider: 'cursor',
+    rulesDir: '.cursor/rules',
+    outputDir: 'build/ai-workflow',
+    minQualityScore: 85,
+    qualityGateMode: 'strict',
+    enableDetailedReports: true
+]
 
-// 自定义任务：生成所有域的Flink SQL
-task generateAllFlinkSql {
-    group = 'flink-ai'
-    description = 'Generate Flink SQL for all domains'
+// AI工作流任务组
+def AI_TASK_GROUP = 'flink-ai'
+
+// 1. 端到端AI工作流任务
+task runAiWorkflow {
+    group AI_TASK_GROUP
+    description '执行完整的AI驱动端到端工作流 (SQL生成 → 验证 → ER知识库更新)'
     
     doLast {
-        println "Scanning for request files in job/ directory..."
+        println """
+        🚀 执行AI驱动端到端工作流
         
-        fileTree('job').matching {
-            include '**/flink-sql-request*.md'
-        }.each { file ->
-            def domainName = file.parentFile.name
-            println "Found domain: $domainName"
+        工作空间: ${aiWorkflowConfig.workspaceDir}
+        AI提供者: ${aiWorkflowConfig.aiProvider}
+        质量标准: ${aiWorkflowConfig.minQualityScore}分
+        输出目录: ${aiWorkflowConfig.outputDir}
+        
+        ⚠️  注意: 当前为模拟模式，实际的AI工作流需要通过Cursor AI执行
+        
+        请在Cursor中使用以下提示词：
+        ================================================
+        请基于 intelligent-end-to-end-workflow.mdc 规则执行完整的端到端工作流，
+        处理 job/wrongbook/wrongbook-request-v3.md 文件。
+
+        请按照以下顺序执行：
+        1. 阶段1：基于 intelligent-sql-job-generator.mdc 生成 Flink SQL
+        2. 阶段2：基于 intelligent-validation-workflow.mdc 进行数据验证
+        3. 阶段3：基于 intelligent-er-knowledge-base.mdc 更新ER知识库
+
+        生成完整的执行报告，包括质量评分和部署建议。
+        ================================================
+        """
+        
+        // 创建输出目录
+        mkdir "${aiWorkflowConfig.outputDir}"
+        
+        // 发现request文件
+        def requestFiles = fileTree(aiWorkflowConfig.workspaceDir) {
+            include '**/*-request-v3.md'
+        }
+        
+        if (requestFiles.isEmpty()) {
+            println "❌ 未找到request文件 (*-request-v3.md)"
+            println "请确保在 ${aiWorkflowConfig.workspaceDir} 目录下有正确的request文件"
+        } else {
+            println "📁 发现以下request文件："
+            requestFiles.each { file ->
+                def relativePath = rootProject.relativePath(file)
+                println "   - ${relativePath}"
+            }
             
-            // 为每个域创建生成任务
-            tasks.create("generate${domainName.capitalize()}FlinkSql", com.flink.ai.FlinkAiWorkflowTask) {
-                requestFile = file
-                outputDir = layout.buildDirectory.dir("flink-ai-output/$domainName")
-                knowledgeBaseDir = file('er-knowledge-base')
-                domain = domainName
-            }.execute()
+            println """
+            
+            ✅ 环境检查完成！
+            📋 请使用上述提示词在Cursor中执行AI工作流
+            """
         }
     }
 }
 
-// 清理任务
-task cleanFlinkAiOutput(type: Delete) {
-    group = 'flink-ai'
-    description = 'Clean Flink AI generated output'
-    delete layout.buildDirectory.dir('flink-ai-output')
+// 2. SQL生成任务
+task generateFlinkSql {
+    group AI_TASK_GROUP
+    description '基于request文件智能生成Flink SQL'
+    
+    doLast {
+        println """
+        📝 阶段1: Flink SQL智能生成
+        
+        请在Cursor中使用以下提示词：
+        ================================================
+        请基于 intelligent-sql-job-generator.mdc 规则，
+        处理 job/wrongbook/wrongbook-request-v3.md 文件，
+        生成优化的Flink SQL代码。
+        ================================================
+        """
+    }
 }
 
-// 构建时自动生成
-//build.dependsOn generateWrongbookFlinkSql
+// 3. 数据验证任务
+task validateFlinkSql {
+    group AI_TASK_GROUP
+    description '对生成的Flink SQL进行多维度质量验证'
+    
+    doLast {
+        println """
+        🔍 阶段2: 数据验证
+        
+        请在Cursor中使用以下提示词：
+        ================================================
+        请基于 intelligent-validation-workflow.mdc 规则，
+        对 job/wrongbook/sql/wrongbook_wide_table_v3.sql 文件
+        进行全面的质量验证和评分。
+        ================================================
+        """
+    }
+}
+
+// 4. ER知识库更新任务
+task updateErKnowledgeBase {
+    group AI_TASK_GROUP
+    description '更新ER图知识库并检测冲突'
+    
+    doLast {
+        println """
+        🗄️ 阶段3: ER知识库更新
+        
+        请在Cursor中使用以下提示词：
+        ================================================
+        请基于 intelligent-er-knowledge-base.mdc 规则，
+        处理 job/wrongbook/wrongbook-request-v3.md 文件，
+        更新ER图知识库并检测冲突。
+        ================================================
+        """
+    }
+}
+
+// 5. 环境检查任务
+task checkAiEnvironment {
+    group AI_TASK_GROUP
+    description '检查AI工作流环境和依赖'
+    
+    doLast {
+        println "🔍 AI工作流环境检查"
+        println "=" * 50
+        
+        // 检查工作空间
+        def workspaceDir = file(aiWorkflowConfig.workspaceDir)
+        println "📁 工作空间: ${workspaceDir.absolutePath}"
+        println "   存在: ${workspaceDir.exists() ? '✅' : '❌'}"
+        
+        // 检查规则文件目录
+        def rulesDir = file(aiWorkflowConfig.rulesDir)
+        println "📋 规则目录: ${rulesDir.absolutePath}"
+        println "   存在: ${rulesDir.exists() ? '✅' : '❌'}"
+        
+        if (rulesDir.exists()) {
+            def ruleFiles = fileTree(rulesDir) {
+                include '*.mdc'
+            }
+            println "   规则文件数量: ${ruleFiles.files.size()}"
+            ruleFiles.each { file ->
+                println "   - ${file.name}"
+            }
+        }
+        
+        // 检查request文件
+        if (workspaceDir.exists()) {
+            def requestFiles = fileTree(workspaceDir) {
+                include '**/*-request-v3.md'
+            }
+            println "📝 Request文件: ${requestFiles.files.size()}个"
+            requestFiles.each { file ->
+                def relativePath = rootProject.relativePath(file)
+                println "   - ${relativePath}"
+            }
+        }
+        
+        // 检查知识库
+        def kbDir = file("${aiWorkflowConfig.workspaceDir}/knowledge-base")
+        println "🗄️ 知识库: ${kbDir.absolutePath}"
+        println "   存在: ${kbDir.exists() ? '✅' : '❌'}"
+        
+        println "=" * 50
+        println "环境检查完成！"
+        
+        // 给出使用建议
+        println """
+        
+        💡 使用说明:
+        1. gradle runAiWorkflow - 执行完整工作流（需要在Cursor中执行AI规则）
+        2. gradle generateFlinkSql - 仅生成SQL
+        3. gradle validateFlinkSql - 仅验证SQL
+        4. gradle updateErKnowledgeBase - 仅更新知识库
+        
+        🤖 AI执行方式:
+        - 当前版本需要在Cursor IDE中手动执行AI规则
+        - 未来版本将支持自动化AI API调用
+        """
+    }
+}
+
+// 6. 创建业务域脚手架
+task createFlinkDomain {
+    group AI_TASK_GROUP
+    description '为新业务域创建标准化的项目结构'
+    
+    doLast {
+        def domainName = project.findProperty('domain') ?: 'new-domain'
+        def domainDir = file("${aiWorkflowConfig.workspaceDir}/${domainName}")
+        
+        println "🏗️ 创建业务域脚手架: ${domainName}"
+        
+        // 创建标准目录结构
+        [
+            "${domainName}/sql",
+            "${domainName}/deployment", 
+            "${domainName}/validation",
+            "${domainName}/docs",
+            "${domainName}/workflow",
+            "${domainName}/config",
+            "${domainName}/.workflow"
+        ].each { dir ->
+            mkdir "${aiWorkflowConfig.workspaceDir}/${dir}"
+        }
+        
+        // 创建request模板文件
+        def requestFile = file("${aiWorkflowConfig.workspaceDir}/${domainName}/${domainName}-request-v3.md")
+        if (!requestFile.exists()) {
+            def templateContent = '''# ''' + domainName + ''' 业务域 Flink SQL 需求
+
+## 🎯 作业信息
+
+```yaml
+job_info:
+  name: "''' + domainName + '''实时宽表"
+  domain: "''' + domainName + '''"
+  event_type: "main_event"
+  description: "''' + domainName + '''业务域的实时数据处理"
+```
+
+## 📊 字段映射
+
+```yaml
+field_mapping:
+  # 从payload映射的字段
+  id: "CAST(payload.id AS BIGINT)"
+  user_id: "payload.user_id"
+  # 添加更多字段映射...
+```
+
+## 🔗 关联关系
+
+```yaml
+join_relationships:
+  source_to_dim:
+    source_table: "payload_entity"
+    source_field: "foreign_key"
+    target_table: "dimension_table"
+    target_field: "primary_key"
+    join_type: "LEFT JOIN"
+```
+
+## 🗺️ ER图定义
+
+### 实体关系图 (Mermaid格式)
+```mermaid
+erDiagram
+    source_table {
+        string id PK "主键ID"
+        string user_id "用户ID"
+    }
+    
+    dimension_table {
+        string id PK "维表主键"
+        string name "名称"
+    }
+    
+    source_table }o--|| dimension_table : "关联关系"
+```
+
+## 📋 特殊条件
+
+```yaml
+special_conditions:
+  filters:
+    - "payload.is_delete = '0'"
+    - "payload.status = 'ACTIVE'"
+```
+'''
+            requestFile.text = templateContent
+        }
+        
+        println """
+        ✅ 业务域脚手架创建完成！
+        
+        📁 创建的目录结构:
+        ${aiWorkflowConfig.workspaceDir}/${domainName}/
+        ├── sql/                    # SQL文件
+        ├── deployment/             # 部署配置
+        ├── validation/             # 验证报告
+        ├── docs/                   # 文档
+        ├── workflow/               # 工作流报告
+        ├── config/                 # 配置文件
+        ├── .workflow/              # 工作流状态
+        └── ${domainName}-request-v3.md  # 需求文件模板
+        
+        📝 下一步:
+        1. 编辑 ${requestFile.absolutePath}
+        2. 完善业务需求和ER图定义
+        3. 运行 gradle runAiWorkflow
+        """
+    }
+}
+
+// 任务依赖关系
+validateFlinkSql.dependsOn generateFlinkSql
+updateErKnowledgeBase.dependsOn validateFlinkSql
+runAiWorkflow.dependsOn checkAiEnvironment
 
 publishing {
     publications {

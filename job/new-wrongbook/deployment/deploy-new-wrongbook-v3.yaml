@@ -1,0 +1,369 @@
+# ============================================================================
+# 新错题本增强版实时宽表作业部署配置 v3.0
+# 业务域: new-wrongbook
+# AI生成时间: 2024-12-27
+# 生成规则: intelligent-sql-job-generator.mdc v3.0
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: new-wrongbook-job-config
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    version: v3.0
+    domain: new-wrongbook
+    generated-by: ai-workflow
+data:
+  job.properties: |
+    # 作业基本配置
+    job.name=new-wrongbook-enhanced-wide-table-v3
+    job.description=新错题本增强版实时宽表处理，支持智能推荐和学习分析
+    job.domain=new-wrongbook
+    job.version=3.0.0
+    job.parallelism=8
+    job.max.parallelism=128
+    
+    # Checkpoint配置
+    execution.checkpointing.interval=30s
+    execution.checkpointing.mode=EXACTLY_ONCE
+    execution.checkpointing.timeout=10min
+    execution.checkpointing.max-concurrent-checkpoints=1
+    execution.checkpointing.min-pause=5s
+    execution.checkpointing.tolerable-failure-number=3
+    
+    # 状态后端配置
+    state.backend=rocksdb
+    state.backend.rocksdb.predefined-options=SPINNING_DISK_OPTIMIZED_HIGH_MEM
+    state.checkpoints.dir=s3://flink-checkpoints/new-wrongbook/
+    state.savepoints.dir=s3://flink-savepoints/new-wrongbook/
+    
+    # 资源配置
+    taskmanager.memory.process.size=4gb
+    taskmanager.memory.flink.size=3200mb
+    taskmanager.numberOfTaskSlots=2
+    jobmanager.memory.process.size=2gb
+    
+    # 网络配置
+    taskmanager.network.memory.fraction=0.15
+    taskmanager.network.memory.min=256mb
+    taskmanager.network.memory.max=1gb
+    
+    # Kafka配置
+    kafka.bootstrap.servers=your-kafka-cluster:9092
+    kafka.topic.business-events=business-events
+    kafka.consumer.group.id=new-wrongbook-enhanced-consumer
+    kafka.consumer.auto.offset.reset=latest
+    
+    # MySQL维表配置
+    mysql.url=jdbc:mysql://pc-bp1ivlu7lykwyzx9x.rwlb.rds.aliyuncs.com:3306/tower
+    mysql.username=zstt_server
+    mysql.password=******
+    mysql.lookup.cache.max-rows=150000
+    mysql.lookup.cache.ttl=45min
+    
+    # MaxCompute配置
+    odps.project=zstt
+    odps.accessId=LTAI5tHvJUm7fEzCfrFT3oam
+    odps.accessKey=******
+    odps.endpoint=http://service.cn-hangzhou.maxcompute.aliyun.com/api
+    odps.table=dwd_enhanced_wrong_record_wide_delta
+    odps.write.bucket.num=32
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-wrongbook-enhanced-job
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    version: v3.0
+    domain: new-wrongbook
+    component: flink-job
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: new-wrongbook-enhanced
+      component: flink-job
+  template:
+    metadata:
+      labels:
+        app: new-wrongbook-enhanced
+        version: v3.0
+        component: flink-job
+      annotations:
+        deployment.kubernetes.io/revision: "3"
+        ai-generated: "true"
+        generated-time: "2024-12-27"
+    spec:
+      containers:
+      - name: flink-job-manager
+        image: flink:1.18.0-scala_2.12-java17
+        ports:
+        - containerPort: 8081
+          name: webui
+        - containerPort: 6123
+          name: rpc
+        - containerPort: 6124
+          name: blob
+        env:
+        - name: JOB_MANAGER_RPC_ADDRESS
+          value: "new-wrongbook-jobmanager"
+        - name: FLINK_PROPERTIES
+          value: |
+            jobmanager.rpc.address: new-wrongbook-jobmanager
+            taskmanager.numberOfTaskSlots: 2
+            blob.server.port: 6124
+            query.server.port: 6125
+            parallelism.default: 8
+            execution.checkpointing.interval: 30s
+            execution.checkpointing.mode: EXACTLY_ONCE
+            state.backend: rocksdb
+            state.checkpoints.dir: s3://flink-checkpoints/new-wrongbook/
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: job-config
+          mountPath: /opt/flink/conf/job.properties
+          subPath: job.properties
+        - name: sql-files
+          mountPath: /opt/flink/sql/
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: job-config
+        configMap:
+          name: new-wrongbook-job-config
+      - name: sql-files
+        configMap:
+          name: new-wrongbook-sql-files
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-wrongbook-enhanced-taskmanager
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    version: v3.0
+    component: flink-taskmanager
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: new-wrongbook-enhanced
+      component: flink-taskmanager
+  template:
+    metadata:
+      labels:
+        app: new-wrongbook-enhanced
+        version: v3.0
+        component: flink-taskmanager
+    spec:
+      containers:
+      - name: flink-task-manager
+        image: flink:1.18.0-scala_2.12-java17
+        env:
+        - name: FLINK_PROPERTIES
+          value: |
+            jobmanager.rpc.address: new-wrongbook-jobmanager
+            taskmanager.numberOfTaskSlots: 2
+            taskmanager.memory.process.size: 4gb
+            taskmanager.memory.flink.size: 3200mb
+            parallelism.default: 8
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2000m"
+          limits:
+            memory: "6Gi"
+            cpu: "4000m"
+        volumeMounts:
+        - name: job-config
+          mountPath: /opt/flink/conf/job.properties
+          subPath: job.properties
+      volumes:
+      - name: job-config
+        configMap:
+          name: new-wrongbook-job-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-wrongbook-jobmanager
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    component: flink-jobmanager
+spec:
+  type: ClusterIP
+  ports:
+  - name: rpc
+    port: 6123
+    targetPort: 6123
+  - name: blob
+    port: 6124
+    targetPort: 6124
+  - name: webui
+    port: 8081
+    targetPort: 8081
+  selector:
+    app: new-wrongbook-enhanced
+    component: flink-job
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-wrongbook-webui
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    component: flink-webui
+spec:
+  type: LoadBalancer
+  ports:
+  - name: webui
+    port: 80
+    targetPort: 8081
+    protocol: TCP
+  selector:
+    app: new-wrongbook-enhanced
+    component: flink-job
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: new-wrongbook-sql-files
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    component: sql-config
+data:
+  new_wrongbook_wide_table_v3.sql: |
+    -- SQL文件内容将在部署时注入
+    -- 文件路径: job/new-wrongbook/sql/new_wrongbook_wide_table_v3.sql
+
+---
+# HPA自动扩缩容配置
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: new-wrongbook-taskmanager-hpa
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    component: hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: new-wrongbook-enhanced-taskmanager
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+
+---
+# 监控和告警配置
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: new-wrongbook-metrics
+  namespace: flink-jobs
+  labels:
+    app: new-wrongbook-enhanced
+    component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: new-wrongbook-enhanced
+  endpoints:
+  - port: webui
+    path: /metrics
+    interval: 30s
+    honorLabels: true
+
+---
+# 网络策略
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: new-wrongbook-network-policy
+  namespace: flink-jobs
+spec:
+  podSelector:
+    matchLabels:
+      app: new-wrongbook-enhanced
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - namespaceSelector:
+        matchLabels:
+          name: flink-jobs
+    ports:
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 6123
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 3306  # MySQL
+    - protocol: TCP
+      port: 9092  # Kafka
+    - protocol: TCP
+      port: 443   # HTTPS (MaxCompute)
+    - protocol: TCP
+      port: 80    # HTTP

@@ -65,13 +65,30 @@ public class {PayloadClass} {
 ```yaml
 field_mapping:
   # 从payload映射的字段
-  {result_field}: payload.{payload_field}
+  id: "CAST(payload.id AS BIGINT)"
+  {domain}_id: "payload.{domain}_id"
+  user_id: "payload.user_id"
+  {business_field}: "payload.{business_field}"
   
   # 从维表映射的字段  
-  {result_field}: {dim_table_alias}.{dim_field}
+  {business_field}_name: "{dim_alias}.name"
+  {related_field}: "CAST({dim_alias}.{related_field} AS STRING)"
   
   # 计算字段
-  {result_field}: {calculation_expression}
+  {enum_field}_name: |
+    CASE payload.{enum_field}
+        WHEN '{value_1}' THEN '{display_1}'
+        WHEN '{value_2}' THEN '{display_2}'
+        ELSE ''
+    END
+  create_time: "TO_TIMESTAMP_LTZ(payload.create_time, 0)"
+  submit_time: "TO_TIMESTAMP_LTZ(payload.submit_time, 0)"
+  {result_field}_desc: |
+    CASE payload.{result_field}
+        WHEN 1 THEN '{success_desc}'
+        WHEN 0 THEN '{fail_desc}'
+        ELSE ''
+    END
 ```
 
 ## 🗺️ ER图定义
@@ -107,18 +124,27 @@ join_relationships:
   # 源表到维表的关联
   source_to_dim1:
     source_table: "{domain}_{event_type}"
-    source_field: "payload.{field_name}"
+    source_field: "payload.{business_field}"
     target_table: "{dim_table_1}"
     target_field: "id"
     join_type: "LEFT JOIN"
+    additional_condition: "payload.isDelete = 0"
     
   # 维表之间的关联
   dim1_to_dim2:
     source_table: "{dim_table_1}"
-    source_field: "{field_name}"
+    source_field: "id"
     target_table: "{dim_table_2}"
-    target_field: "id"
+    target_field: "{related_field}"
     join_type: "LEFT JOIN"
+    additional_condition: "{alias}.is_delete = 0"
+
+# 特殊业务规则
+special_conditions:
+  business_rule_1:
+    description: "{business_rule_description}"
+    condition: |
+      ({condition_expression})
 ```
 
 ## 💬 备注说明

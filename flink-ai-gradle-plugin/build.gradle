@@ -1,0 +1,123 @@
+plugins {
+    id 'java-gradle-plugin'
+    id 'maven-publish'
+    id 'groovy'
+}
+
+group = 'com.flink.ai'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    gradlePluginPortal()
+}
+
+dependencies {
+    // Gradle API
+    implementation gradleApi()
+    implementation localGroovy()
+    
+    // JSON and YAML processing
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.15.2'
+    implementation 'org.yaml:snakeyaml:2.0'
+    
+    // HTTP client for AI API calls
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    
+    // Template engine
+    implementation 'org.freemarker:freemarker:2.3.32'
+    
+    // File watching
+    implementation 'io.methvin:directory-watcher:0.17.1'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:1.7.36'
+    
+    // Test dependencies
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
+    testImplementation 'org.mockito:mockito-core:5.1.1'
+    testImplementation gradleTestKit()
+}
+
+gradlePlugin {
+    plugins {
+        flinkAiWorkflow {
+            id = 'com.flink.ai.workflow'
+            implementationClass = 'com.flink.ai.gradle.FlinkAiWorkflowPlugin'
+            displayName = 'Flink AI Workflow Plugin'
+            description = 'AI-driven Flink SQL development workflow plugin'
+        }
+    }
+}
+
+// Plugin development configuration
+pluginBundle {
+    website = 'https://github.com/yangfanlin/flink-task'
+    vcsUrl = 'https://github.com/yangfanlin/flink-task.git'
+    description = 'A comprehensive AI-driven Flink SQL development workflow plugin'
+    tags = ['flink', 'ai', 'sql', 'workflow', 'automation']
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// Task to copy rule files to plugin resources
+task copyRuleFiles(type: Copy) {
+    from '../.cursor/rules'
+    into 'src/main/resources/rules'
+    include '*.mdc'
+}
+
+// Task to copy configuration files
+task copyConfigFiles(type: Copy) {
+    from '../job/ai-config'
+    into 'src/main/resources/config'
+    include '*.yml'
+}
+
+// Task to copy templates
+task copyTemplateFiles(type: Copy) {
+    from '../job'
+    into 'src/main/resources/templates'
+    include '*-template*.md'
+    include 'validation-report-template.md'
+}
+
+// Ensure resources are copied before building
+processResources.dependsOn copyRuleFiles, copyConfigFiles, copyTemplateFiles
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            
+            pom {
+                name = 'Flink AI Workflow Gradle Plugin'
+                description = 'AI-driven Flink SQL development workflow automation'
+                url = 'https://github.com/yangfanlin/flink-task'
+                
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+                
+                developers {
+                    developer {
+                        id = 'yangfanlin'
+                        name = 'Yang Fanlin'
+                        email = 'yangfanlin@example.com'
+                    }
+                }
+            }
+        }
+    }
+}
