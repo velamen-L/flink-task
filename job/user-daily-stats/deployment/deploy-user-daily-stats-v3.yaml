@@ -1,0 +1,275 @@
+# 阿里云VVR平台部署配置 - 用户日统计作业
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-daily-stats-job-config
+  namespace: vvr-flink-ai
+data:
+  # VVR作业配置
+  job.yaml: |
+    apiVersion: datastream.alibaba.com/v1alpha1
+    kind: FlinkDeployment
+    metadata:
+      name: user-daily-stats-v3
+      namespace: vvr-flink-ai
+      labels:
+        app: user-daily-stats
+        version: v3.0.0
+        domain: multi-domain
+        type: statistical-job
+    spec:
+      # VVR平台托管的资源配置
+      flinkConfiguration:
+        # 作业管理器配置
+        jobmanager.memory.process.size: "2g"
+        jobmanager.memory.flink.size: "1600m"
+        
+        # 任务管理器配置  
+        taskmanager.memory.process.size: "6g"
+        taskmanager.memory.flink.size: "4800m"
+        taskmanager.numberOfTaskSlots: "8"
+        
+        # 并行度配置
+        parallelism.default: "16"
+        
+        # 检查点配置
+        execution.checkpointing.interval: "60s"
+        execution.checkpointing.min-pause: "30s"
+        execution.checkpointing.timeout: "10min"
+        state.backend: "rocksdb"
+        state.savepoints.dir: "oss://flink-ai-savepoints/user-daily-stats/"
+        execution.checkpointing.externalized-checkpoint-retention: "RETAIN_ON_CANCELLATION"
+        
+        # 状态TTL配置(处理跨域关联)
+        table.exec.state.ttl: "24h"
+        
+        # 内存优化配置
+        taskmanager.memory.managed.fraction: "0.6"
+        taskmanager.memory.network.fraction: "0.15"
+        
+        # 多流JOIN优化
+        table.optimizer.join-reorder-enabled: "true"
+        table.exec.spill-compression.enabled: "true"
+        
+      # VVR平台自动管理的监控配置
+      monitoring:
+        enabled: true
+        prometheus.enabled: true
+        grafana.enabled: true
+        
+        # 自定义指标
+        metrics:
+          - name: "daily_stats_users_processed_total"
+            description: "处理用户数"
+            type: "counter"
+          - name: "cross_domain_join_success_rate" 
+            description: "跨域JOIN成功率"
+            type: "gauge"
+          - name: "user_daily_stats_processing_delay"
+            description: "数据处理延迟"
+            type: "histogram"
+          - name: "active_users_ratio"
+            description: "活跃用户占比"
+            type: "gauge"
+        
+        # 告警配置
+        alerts:
+          - name: "cross_domain_join_failure"
+            condition: "cross_domain_join_success_rate < 0.9"
+            severity: "warning"
+            notification: "sms,email"
+          - name: "processing_delay_high"
+            condition: "user_daily_stats_processing_delay_p95 > 600000"  # 10分钟
+            severity: "critical"
+            notification: "sms,email,phone"
+          - name: "active_users_anomaly"
+            condition: "abs(active_users_ratio - active_users_ratio_avg_7d) > 0.3"
+            severity: "warning"
+            notification: "email"
+        
+      # 与阿里云服务集成
+      connectors:
+        # Kafka连接器配置
+        kafka:
+          security.protocol: "SASL_PLAINTEXT"
+          sasl.mechanism: "PLAIN"
+          bootstrap.servers: "kafka-cluster.vpc:9092"
+          consumer.auto.offset.reset: "latest"
+          
+        # JDBC连接器配置
+        jdbc:
+          url: "jdbc:mysql://mysql-host.vpc:3306/user_db"
+          username: "flink_user"
+          password: "${secret.mysql.password}"
+          connection.max-retry-timeout: "60s"
+          
+        # MaxCompute连接器配置
+        maxcompute:
+          project: "flink_ai_project"
+          endpoint: "http://service.cn-hangzhou.maxcompute.aliyun.com/api"
+          tunnel.endpoint: "http://dt.cn-hangzhou.maxcompute.aliyun.com"
+          accessId: "${secret.odps.accessId}"
+          accessKey: "${secret.odps.accessKey}"
+          
+      # 自动扩缩容配置(VVR平台托管)
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 8
+        targetCPUUtilizationPercentage: 70
+        scaleUpPolicy:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: "Percent"
+              value: 100
+              periodSeconds: 60
+        scaleDownPolicy:
+          stabilizationWindowSeconds: 600
+          policies:
+            - type: "Percent" 
+              value: 50
+              periodSeconds: 180
+
+---
+# 服务发现配置
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-daily-stats-service
+  namespace: vvr-flink-ai
+spec:
+  selector:
+    app: user-daily-stats
+  ports:
+    - name: jobmanager-rpc
+      port: 6123
+      targetPort: 6123
+    - name: jobmanager-blob
+      port: 6124
+      targetPort: 6124
+    - name: jobmanager-ui
+      port: 8081
+      targetPort: 8081
+    - name: taskmanager-data
+      port: 6122
+      targetPort: 6122
+
+---
+# 网络策略配置
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: user-daily-stats-network-policy
+  namespace: vvr-flink-ai
+spec:
+  podSelector:
+    matchLabels:
+      app: user-daily-stats
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: vvr-flink-ai
+      ports:
+        - protocol: TCP
+          port: 6123
+        - protocol: TCP
+          port: 8081
+  egress:
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 9092  # Kafka
+        - protocol: TCP  
+          port: 3306  # MySQL
+        - protocol: TCP
+          port: 443   # HTTPS (MaxCompute, OSS)
+
+---
+# 配置密钥管理
+apiVersion: v1
+kind: Secret
+metadata:
+  name: user-daily-stats-secrets
+  namespace: vvr-flink-ai
+type: Opaque
+data:
+  mysql.password: "ZmxpbmtfcGFzcw=="  # base64 encoded
+  odps.accessId: "LTAI5tAccessId"       # 请替换为实际的AccessId
+  odps.accessKey: "AccessKeySecret"     # 请替换为实际的AccessKey
+
+---
+# 资源配额限制
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: user-daily-stats-quota
+  namespace: vvr-flink-ai
+spec:
+  hard:
+    requests.cpu: "16"
+    requests.memory: "32Gi"
+    limits.cpu: "32" 
+    limits.memory: "64Gi"
+    persistentvolumeclaims: "4"
+
+---
+# HPA水平扩缩容(VVR平台增强)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: user-daily-stats-hpa
+  namespace: vvr-flink-ai
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: user-daily-stats-taskmanager
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    # VVR自定义指标
+    - type: Object
+      object:
+        metric:
+          name: kafka_consumer_lag
+        target:
+          type: AverageValue
+          averageValue: "1000"
+    - type: Object
+      object:
+        metric:
+          name: processing_delay_p95
+        target:
+          type: AverageValue
+          averageValue: "300000"  # 5分钟
+
+---
+# 持久化存储配置
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: user-daily-stats-storage
+  namespace: vvr-flink-ai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: alicloud-disk-ssd

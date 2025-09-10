@@ -1,0 +1,125 @@
+# 错题本修正记录极简配置
+
+## 📊 ER图定义
+
+```plantuml
+@startuml
+!theme plain
+skinparam linetype ortho
+
+' 错题本修正记录实时宽表ER图
+title 错题本修正记录实时宽表ER图
+
+' 源表定义 (Kafka)
+entity "BusinessEvent" as be <<source>> {
+  * domain : string <<业务域>>
+  * type : string <<事件类型>>
+  * payload : string <<错题修正载荷JSON>>
+  * event_time : timestamp <<事件时间>>
+  --
+  table_type: source
+  domain: wrongbook
+  topic: wrongbook-events
+  connector: kafka
+}
+
+' 维表定义 (MySQL + TTL)
+entity "tower_pattern" as tp <<dimension>> {
+  * id : string <<题型ID>> <<PK>>
+  * name : string <<题型名称>>
+  * subject : string <<学科>>
+  * difficulty : decimal(5,3) <<难度系数>>
+  --
+  table_type: dimension
+  connector: mysql + ttl(30min)
+}
+
+entity "tower_teaching_type_pt" as ttp <<dimension>> {
+  * id : bigint <<关联表ID>> <<PK>>
+  * teaching_type_id : bigint <<教学类型ID>>
+  * pt_id : string <<题型ID>>
+  * is_delete : tinyint <<删除标记>>
+  --
+  table_type: dimension
+  connector: mysql + ttl(30min)
+}
+
+entity "tower_teaching_type" as tt <<dimension>> {
+  * id : bigint <<教学类型ID>> <<PK>>
+  * teaching_type_name : string <<教学类型名称>>
+  * chapter_id : string <<章节ID>>
+  * is_delete : tinyint <<删除标记>>
+  --
+  table_type: dimension
+  connector: mysql + ttl(30min)
+}
+
+' 关联关系
+be ||--o{ tp : "payload.patternId = id\n[LEFT JOIN]"
+tp ||--o{ ttp : "id = pt_id\n[LEFT JOIN]\nAND is_delete = 0"
+ttp ||--o{ tt : "teaching_type_id = id\n[LEFT JOIN]\nAND is_delete = 0"
+
+' 注释说明
+note right of be
+  Kafka源表
+  - 自动配置topic: wrongbook-events
+  - 自动过滤: domain = 'wrongbook'
+  - 载荷字段: payload.patternId等
+end note
+
+note right of tp
+  题型维表 (MySQL)
+  - 自动配置TTL缓存: 30分钟
+  - FOR SYSTEM_TIME AS OF优化
+end note
+
+note bottom
+  结果表通过字段映射配置定义
+  - 支持指标描述智能生成SQL
+  - 自动推断结果表结构
+end note
+
+@enduml
+```
+
+## 🔄 字段映射定义
+
+```yaml
+# 结果表配置
+result_table:
+  table_name: "dwd_wrong_record_wide_delta"
+  table_type: "result"
+  connector: "odps"
+  primary_key: ["id"]
+
+# 字段映射配置
+field_mapping:
+  # 基础字段映射
+  id: "payload.fixId"
+  wrong_id: "payload.wrongId"
+  user_id: "payload.userId"
+  subject: "payload.subject"
+  question_id: "payload.questionId"
+  pattern_id: "payload.patternId"
+  fix_id: "payload.fixId"
+  fix_result: "payload.fixResult"
+  
+  # 维表字段映射
+  pattern_name: "tower_pattern.name"
+  teaching_type_id: "tower_teaching_type.id"
+  teaching_type_name: "tower_teaching_type.teaching_type_name"
+  
+  # 计算字段
+  subject_name: "CASE payload.subject WHEN 'ENGLISH' THEN '英语' WHEN 'BIOLOGY' THEN '生物' WHEN 'MATH' THEN '数学' WHEN 'PHYSICS' THEN '物理' WHEN 'CHEMISTRY' THEN '化学' WHEN 'CHINESE' THEN '语文' ELSE '' END"
+  fix_result_desc: "CASE payload.fixResult WHEN 1 THEN '订正' WHEN 0 THEN '未订正' ELSE '' END"
+  
+  # 时间字段转换
+  collect_time: "TO_TIMESTAMP_LTZ(payload.createTime, 0)"
+  fix_time: "TO_TIMESTAMP_LTZ(payload.submitTime, 0)"
+  
+  # 智能指标字段 (基于描述生成SQL)
+  learning_progress_score: "根据用户错题修正的时间间隔和修正成功率，计算学习进度分数，体现学习效果的提升趋势"
+  subject_weakness_analysis: "基于用户在各学科的错题分布和修正情况，识别学科薄弱点并给出改进建议等级"
+  pattern_mastery_index: "分析用户对特定题型的掌握程度，结合题型难度和修正历史，计算掌握度指数"
+  study_efficiency_rating: "综合考虑修正时间、题型难度、学科分布，计算用户的学习效率评级"
+```
