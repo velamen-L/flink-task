@@ -71,14 +71,17 @@ task generateSql {
     
     doLast {
         def requestPath = project.findProperty('file') ?: ''
+        def environment = project.findProperty('env') ?: 'test'
         
         if (!requestPath) {
             println """
             ❌ 错误: 未指定request文件路径
             
             使用方法:
-            gradle generateSql -Pfile=job/wrongbook/request.md
-            gradle generateSql -Pfile=job/user-stats/request.md
+            gradle generateSql -Pfile=job/wrongbook/request.md -Penv=test
+            gradle generateSql -Pfile=job/user-stats/request.md -Penv=prod
+            
+            🌍 支持的环境: test, pre, prod (默认: test)
             """
             throw new GradleException("必须指定request文件路径")
         }
@@ -194,13 +197,16 @@ task generateSqlAuto {
     
     doLast {
         def requestPath = project.findProperty('file') ?: ''
+        def environment = project.findProperty('env') ?: 'test'
         
         if (!requestPath) {
             println """
             ❌ 错误: 未指定request文件路径
             
             使用方法:
-            gradle generateSqlAuto -Pfile=job/wrongbook/request.md
+            gradle generateSqlAuto -Pfile=job/wrongbook/request.md -Penv=test
+            
+            🌍 支持的环境: test, pre, prod (默认: test)
             """
             throw new GradleException("必须指定request文件路径")
         }
@@ -223,17 +229,31 @@ task generateSqlAuto {
             mkdir dir
         }
         
-        def promptText = """请基于 ultra-simple-sql-generator.mdc 规则，处理 ${requestPath} 文件，生成完整的Flink SQL和测试数据。
+        def promptText = """请基于 ${ultraSimpleSqlConfig.rulesFile} 规则处理以下输入文件，生成 Flink SQL 和 Kafka 测试数据。
 
-输出要求：
+输入文件: ${requestPath}
+环境配置: config/env-${environment}.yml
+
+输出要求:
 1. SQL文件: ${domainPath}/${ultraSimpleSqlConfig.outputSqlDir}/${domainName}_ultra.sql
-2. 测试数据: ${domainPath}/${ultraSimpleSqlConfig.outputTestDir}/kafka-test-data.md"""
+2. 测试数据: ${domainPath}/${ultraSimpleSqlConfig.outputTestDir}/kafka-test-data.md
+
+重要说明:
+- 请读取环境配置文件 config/env-${environment}.yml 获取数据库和Kafka连接信息
+- 根据环境配置生成对应的连接器参数
+- Kafka topic格式: biz_statistic_{domain}{topic_suffix}
+- Kafka使用统一的group_id，不加domain后缀
+- 暂不配置event_time和watermark
+- MySQL结果表名直接使用table_name，不使用前缀
+
+请直接开始处理，无需确认。"""
 
         println """
         🚀 自动Cursor集成模式
         
         📁 业务域: ${domainName}
         📄 输入文件: ${requestPath}
+        🌍 环境配置: ${environment}
         🤖 尝试自动集成...
         """
         
@@ -378,12 +398,14 @@ task generateSqlAgent {
     
     doLast {
         def requestPath = project.findProperty('file') ?: ''
+        def environment = project.findProperty('env') ?: 'test'
         
         if (!requestPath) {
             println """
             ❌ 请指定request.md文件路径
-            💡 用法: gradle generateSqlAgent -Pfile=job/your-domain/request.md
+            💡 用法: gradle generateSqlAgent -Pfile=job/your-domain/request.md -Penv=test
             
+            🌍 支持的环境: test, pre, prod (默认: test)
             📋 可用文件列表:
             """
             
@@ -393,7 +415,7 @@ task generateSqlAgent {
                 jobDir.eachDirRecurse { dir ->
                     def requestFile = new File(dir, ultraSimpleSqlConfig.requestFileName)
                     if (requestFile.exists()) {
-                        requestFiles.add("    gradle generateSqlAgent -Pfile=${dir.path - rootDir.path - '/'}/request.md")
+                        requestFiles.add("    gradle generateSqlAgent -Pfile=${dir.path - rootDir.path - '/'}/request.md -Penv=test")
                     }
                 }
             }
@@ -418,10 +440,19 @@ task generateSqlAgent {
 请基于 ${ultraSimpleSqlConfig.rulesFile} 规则处理以下输入文件，生成 Flink SQL 和 Kafka 测试数据。
 
 输入文件: ${requestPath}
+环境配置: config/env-${environment}.yml
 
 输出要求:
 1. SQL文件: ${domainPath}/${ultraSimpleSqlConfig.outputSqlDir}/${domainName}_ultra.sql
 2. 测试数据: ${domainPath}/${ultraSimpleSqlConfig.outputTestDir}/kafka-test-data.md
+
+重要说明:
+- 请读取环境配置文件 config/env-${environment}.yml 获取数据库和Kafka连接信息
+- 根据环境配置生成对应的连接器参数
+- Kafka topic格式: biz_statistic_{domain}{topic_suffix}
+- Kafka使用统一的group_id，不加domain后缀
+- 暂不配置event_time和watermark
+- MySQL结果表名直接使用table_name，不使用前缀
 
 请直接开始处理，无需确认。
 """
@@ -431,6 +462,7 @@ task generateSqlAgent {
         
         📁 业务域: ${domainName}
         📄 输入文件: ${requestPath}
+        🌍 环境配置: ${environment}
         🤖 正在启动Cursor Agent...
         """
         
@@ -892,9 +924,14 @@ task sqlHelp {
            - 添加智能指标描述
         
         3️⃣ 生成Flink SQL:
-           gradle generateSql -Pfile=job/your-domain/request.md      # 复制到剪贴板
-           gradle generateSqlAuto -Pfile=job/your-domain/request.md   # 半自动化 (推荐)
-           gradle generateSqlAgent -Pfile=job/your-domain/request.md  # 完全自动化 (Beta)
+           gradle generateSql -Pfile=job/your-domain/request.md -Penv=test      # 复制到剪贴板
+           gradle generateSqlAuto -Pfile=job/your-domain/request.md -Penv=test   # 半自动化 (推荐)
+           gradle generateSqlAgent -Pfile=job/your-domain/request.md -Penv=test  # 完全自动化 (Beta)
+           
+        🌍 环境参数:
+           -Penv=test   # 测试环境 (默认)
+           -Penv=pre    # 预发环境
+           -Penv=prod   # 生产环境
         
         4️⃣ AI执行选项:
            - generateSql: 提示词复制到剪贴板，手动在Cursor中执行

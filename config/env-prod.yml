@@ -1,0 +1,28 @@
+# 生产环境配置
+environment: prod
+
+# MySQL数据库配置
+mysql:
+  hostname: "rm-bp1543eg312q7x4n3-prod.mysql.rds.aliyuncs.com"
+  port: "3306"
+  username: "app_rw_prod"
+  password: "ProdPassword456"
+
+# Kafka配置
+kafka:
+  bootstrap_servers: "alikafka-prod-cn-gh6439cb1005-1-vpc.alikafka.aliyuncs.com:9092,alikafka-prod-cn-gh6439cb1005-2-vpc.alikafka.aliyuncs.com:9092,alikafka-prod-cn-gh6439cb1005-3-vpc.alikafka.aliyuncs.com:9092"
+  group_id: "flink-business-prod"
+  topic_suffix: ""
+
+# 连接器配置
+connectors:
+  mysql:
+    # 默认lookup缓存配置（当维表未指定ttl时使用）
+    default_lookup_cache_max_rows: "200000"
+    default_lookup_cache_strategy: "LRU"
+    default_lookup_cache_ttl: "15 minutes"
+    default_lookup_max_retries: "5"
+  kafka:
+    format: "json"
+    startup_mode: "earliest-offset"
+    timestamp_format: "ISO-8601"

@@ -64,23 +64,28 @@ field_mapping:
 </input_format>
 
 <connector_rules>
-连接器自动配置规则：
+连接器自动配置规则（基于环境配置文件）：
 
 1. **源表 (table_type: source)**
    - connector: kafka
-   - topic: {domain}-events (基于domain生成)
-   - 自动添加processing_time和watermark
+   - topic: biz_statistic_{domain}{topic_suffix} (基于环境配置)
+   - 自动添加processing_time AS PROCTIME()
    - 事件过滤: domain = '{domain}'
+   - 连接配置：从env-{env}.yml读取kafka配置
 
 2. **维表 (table_type: dimension)**
-   - connector: jdbc (MySQL)
-   - 自动添加lookup.cache.ttl = '30 min'
-   - 自动添加lookup.cache.max-rows = '100000'
+   - connector: mysql (默认，可省略)
+   - database: 从ER图entity配置中读取
+   - mysql配置：从env-{env}.yml读取hostname、username、password等
+   - ttl配置：优先使用entity配置，未指定时使用env配置的default值
    - 支持FOR SYSTEM_TIME AS OF优化
+   - 表名：直接使用ER图中定义的表名
 
 3. **结果表 (result_table配置)**
-   - connector: odps (MaxCompute)
-   - 自动配置upsert模式
+   - connector: mysql (不再使用ODPS)
+   - database：从result_table配置中读取
+   - mysql配置：从env-{env}.yml读取hostname、username、password等
+   - 表名：{table_prefix}{table_name} (支持前缀)
    - 基于primary_key设置主键约束
    - 字段结构根据field_mapping自动推断
 </connector_rules>
@@ -88,19 +93,25 @@ field_mapping:
 <generation_logic>
 SQL生成逻辑：
 
-1. **PlantUML解析**
+1. **环境配置读取**
+   - 读取config/env-{环境}.yml配置文件
+   - 获取mysql、kafka连接信息
+   - 获取连接器优化参数
+
+2. **PlantUML解析**
    - 解析entity定义获取表结构和类型
    - 从<<table_type>>标签识别连接器类型
    - 从entity内容解析字段定义和约束
    - 从关联关系解析JOIN条件
 
-2. **DDL生成**
-   - 根据table_type自动选择连接器 (源表/维表)
-   - 根据PlantUML字段定义生成CREATE语句
-   - 根据result_table配置生成结果表DDL
+3. **DDL生成**
+   - 根据table_type和环境配置生成连接器配置
+   - Kafka源表：使用环境配置的连接信息
+   - MySQL维表：database从ER图读取，ttl优先使用entity配置
+   - MySQL结果表：database从result_table配置读取，支持表前缀
    - 结果表字段类型根据field_mapping智能推断
 
-3. **DML生成**
+4. **DML生成**
    - 基于PlantUML关联关系生成JOIN链
    - 根据field_mapping生成SELECT字段
    - 自动处理payload.field → JSON_VALUE转换
@@ -123,35 +134,67 @@ SQL生成逻辑：
 <output_format>
 生成内容包括：
 
-1. **完整Flink SQL文件**
+1. **完整Flink SQL文件** (基于环境配置)
 ```sql
--- 自动生成的表定义
-CREATE TEMPORARY TABLE source_table (...) WITH (
+-- 源表定义 (Kafka)
+CREATE TEMPORARY TABLE BusinessEvent (
+    domain STRING,
+    type STRING,
+    payload STRING,
+    processing_time AS PROCTIME()
+) WITH (
     'connector' = 'kafka',
-    'topic' = '{domain}-events',
-    -- 其他kafka配置
+    'properties.bootstrap.servers' = '${从env配置读取}',
+    'properties.group.id' = '${从env配置读取}',
+    'topic' = 'biz_statistic_{domain}{topic_suffix}',
+    'format' = 'json',
+    'scan.startup.mode' = '${从env配置读取}',
+    'json.timestamp-format.standard' = 'ISO-8601'
 );
 
-CREATE TEMPORARY TABLE dim_table (...) WITH (
-    'connector' = 'jdbc',
-    'lookup.cache.ttl' = '30 min',
-    -- 其他mysql配置
+-- 维表定义 (MySQL)
+CREATE TEMPORARY TABLE dim_table (
+    id STRING NOT NULL,
+    name STRING,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'connector' = 'mysql',
+    'database-name' = '${从ER图entity配置读取database}',
+    'hostname' = '${从env配置读取}',
+    'lookup.cache.max-rows' = '${从entity或env配置读取}',
+    'lookup.cache.strategy' = 'LRU',
+    'lookup.cache.ttl' = '${优先entity配置ttl，否则使用env默认值}',
+    'lookup.max-retries' = '${从env配置读取}',
+    'password' = '${从env配置读取}',
+    'port' = '${从env配置读取}',
+    'table-name' = 'dim_table',
+    'username' = '${从env配置读取}'
 );
 
-CREATE TEMPORARY TABLE result_table (...) WITH (
-    'connector' = 'odps',
-    -- 其他odps配置
+-- 结果表定义 (MySQL)
+CREATE TEMPORARY TABLE result_table (
+    id STRING NOT NULL,
+    field STRING,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'connector' = 'mysql',
+    'database-name' = '${从result_table配置读取database}',
+    'hostname' = '${从env配置读取}',
+    'password' = '${从env配置读取}',
+    'port' = '${从env配置读取}',
+    'table-name' = '${table_prefix}result_table',
+    'username' = '${从env配置读取}'
 );
 
 -- 业务逻辑SQL
 INSERT INTO result_table
 SELECT 
-    JSON_VALUE(source.payload, '$.field') as field,
-    dim.field as dim_field
-FROM source_table source
-LEFT JOIN dim_table FOR SYSTEM_TIME AS OF source.processing_time dim
-    ON dim.id = JSON_VALUE(source.payload, '$.foreign_key')
-WHERE source.domain = '{domain}';
+    JSON_VALUE(be.payload, '$.id') as id,
+    JSON_VALUE(be.payload, '$.field') as field
+FROM BusinessEvent be
+LEFT JOIN dim_table FOR SYSTEM_TIME AS OF be.processing_time dim
+    ON dim.id = JSON_VALUE(be.payload, '$.foreign_key')
+WHERE be.domain = '{domain}';
 ```
 
 2. **JSON测试数据文件 (.md格式)**
@@ -201,6 +244,8 @@ entity "user_info" as ui <<dimension>> {
   * user_name : string <<用户名>>
   --
   table_type: dimension
+  database: user_center
+  ttl: 15min
 }
 
 entity "user_stats" as us <<result>> {

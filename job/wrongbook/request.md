@@ -15,7 +15,7 @@ entity "BusinessEvent" as be <<source>> {
   * domain : string <<业务域>>
   * type : string <<事件类型>>
   * payload : string <<错题修正载荷JSON>>
-  * event_time : timestamp <<事件时间>>
+  * event_time : string <<事件时间>>
   --
   table_type: source
   domain: wrongbook
@@ -23,7 +23,7 @@ entity "BusinessEvent" as be <<source>> {
   connector: kafka
 }
 
-' 维表定义 (MySQL + TTL)
+' 维表定义 (MySQL)
 entity "tower_pattern" as tp <<dimension>> {
   * id : string <<题型ID>> <<PK>>
   * name : string <<题型名称>>
@@ -31,7 +31,8 @@ entity "tower_pattern" as tp <<dimension>> {
   * difficulty : decimal(5,3) <<难度系数>>
   --
   table_type: dimension
-  connector: mysql + ttl(30min)
+  database: tower
+  ttl: 30min
 }
 
 entity "tower_teaching_type_pt" as ttp <<dimension>> {
@@ -41,7 +42,8 @@ entity "tower_teaching_type_pt" as ttp <<dimension>> {
   * is_delete : tinyint <<删除标记>>
   --
   table_type: dimension
-  connector: mysql + ttl(30min)
+  database: tower
+  ttl: 30min
 }
 
 entity "tower_teaching_type" as tt <<dimension>> {
@@ -51,7 +53,7 @@ entity "tower_teaching_type" as tt <<dimension>> {
   * is_delete : tinyint <<删除标记>>
   --
   table_type: dimension
-  connector: mysql + ttl(30min)
+  database: tower
 }
 
 ' 关联关系
@@ -69,7 +71,8 @@ end note
 
 note right of tp
   题型维表 (MySQL)
-  - 自动配置TTL缓存: 30分钟
+  - database: tower
+  - ttl: 30min (自定义缓存时间)
   - FOR SYSTEM_TIME AS OF优化
 end note
 
@@ -89,7 +92,8 @@ end note
 result_table:
   table_name: "dwd_wrong_record_wide_delta"
   table_type: "result"
-  connector: "odps"
+  connector: "mysql"
+  database: "guarder"
   primary_key: ["id"]
 
 # 字段映射配置
@@ -114,8 +118,8 @@ field_mapping:
   fix_result_desc: "CASE payload.fixResult WHEN 1 THEN '订正' WHEN 0 THEN '未订正' ELSE '' END"
   
   # 时间字段转换
-  collect_time: "TO_TIMESTAMP_LTZ(payload.createTime, 0)"
-  fix_time: "TO_TIMESTAMP_LTZ(payload.submitTime, 0)"
+  collect_time: "payload.createTime"
+  fix_time: "payload.submitTime"
   
   # 智能指标字段 (基于描述生成SQL)
   learning_progress_score: "根据用户错题修正的时间间隔和修正成功率，计算学习进度分数，体现学习效果的提升趋势"

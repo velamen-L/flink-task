@@ -12,14 +12,14 @@ entity "BusinessEvent" as be <<source>> {
   * domain : string <<业务域>>
   * type : string <<事件类型>>
   * payload : string <<业务载荷JSON>>
-  * event_time : timestamp <<事件时间>>
+  * event_time : string <<事件时间>>
   --
   table_type: source
   domain: wrongbook
   topic: wrongbook-events
 }
 
-' 维表定义 (MySQL + TTL)
+' 维表定义 (MySQL)
 entity "tower_pattern" as tp <<dimension>> {
   * id : string <<题型ID>> <<PK>>
   * name : string <<题型名称>>
@@ -27,7 +27,8 @@ entity "tower_pattern" as tp <<dimension>> {
   * difficulty : decimal(5,3) <<难度系数>>
   --
   table_type: dimension
-  connector: mysql + ttl(30min)
+  database: tower
+  ttl: 30min
 }
 
 entity "tower_teaching_type_pt" as ttp <<dimension>> {
@@ -37,7 +38,7 @@ entity "tower_teaching_type_pt" as ttp <<dimension>> {
   * is_delete : tinyint <<删除标记>>
   --
   table_type: dimension
-  connector: mysql + ttl(30min)
+  database: tower
 }
 
 ' 关联关系
@@ -45,7 +46,7 @@ be ||--o{ tp : "payload.patternId = id"
 tp ||--o{ ttp : "id = pt_id AND is_delete = 0"
 
 note right of be : "Kafka源表\n自动配置topic"
-note right of tp : "MySQL维表\n自动配置TTL缓存"
+note right of tp : "MySQL维表\ndatabase: 数据库名\nttl: 缓存时间(可选)"
 note bottom : "结果表通过字段映射配置定义"
 
 @enduml
@@ -58,7 +59,8 @@ note bottom : "结果表通过字段映射配置定义"
 result_table:
   table_name: "dwd_wrong_record_wide_delta"
   table_type: "result"
-  connector: "odps"
+  connector: "mysql"
+  database: "guarder"
   primary_key: ["id"]
 
 # 字段映射配置

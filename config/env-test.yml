@@ -1,0 +1,28 @@
+# 测试环境配置
+environment: test
+
+# MySQL数据库配置
+mysql:
+  hostname: "rm-bp1543eg312q7x4n3.mysql.rds.aliyuncs.com"
+  port: "3306"
+  username: "app_rw"
+  password: "vGcvUh7wbGREWucW6LR0"
+
+# Kafka配置
+kafka:
+  bootstrap_servers: "alikafka-post-cn-gh6439cb1005-1-vpc.alikafka.aliyuncs.com:9092,alikafka-post-cn-gh6439cb1005-2-vpc.alikafka.aliyuncs.com:9092,alikafka-post-cn-gh6439cb1005-3-vpc.alikafka.aliyuncs.com:9092"
+  group_id: "flink-business-test"
+  topic_suffix: "-test"
+
+# 连接器配置
+connectors:
+  mysql:
+    # 默认lookup缓存配置（当维表未指定ttl时使用）
+    default_lookup_cache_max_rows: "100000"
+    default_lookup_cache_strategy: "LRU"
+    default_lookup_cache_ttl: "10 minutes"
+    default_lookup_max_retries: "3"
+  kafka:
+    format: "json"
+    startup_mode: "latest-offset"
+    timestamp_format: "ISO-8601"
