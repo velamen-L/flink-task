@@ -117,19 +117,240 @@ SQL生成逻辑：
    - 自动处理payload.field → JSON_VALUE转换
    - **智能指标生成**: 根据自然语言描述生成复杂SQL逻辑
 
-4. **指标智能生成**
-   - 识别field_mapping中的自然语言描述
-   - 分析业务场景和上下文数据
-   - 生成对应的聚合函数、窗口函数、CASE表达式
-   - 支持复杂指标计算逻辑的自动生成
+4. **复杂场景智能识别与处理**
+   - **窗口函数场景**：识别"七天内"、"最近N天"、"过去一周"等时间窗口描述
+   - **聚合统计场景**：识别"正确率"、"平均值"、"成功率"、"总数"等聚合计算
+   - **历史数据场景**：识别需要查询历史数据的指标
+   - **临时表场景**：当需要复杂子查询或多步计算时自动生成WITH子句
+   - **窗口类型自动选择**：
+     - 滚动窗口：用于固定周期统计
+     - 滑动窗口：用于实时统计
+     - 会话窗口：用于用户行为分析
+   - **时间函数处理**：自动使用processing_time或event_time进行时间计算
 
-5. **JSON测试数据生成**
+5. **复杂场景SQL模式**
+   - **历史统计模式**：使用WITH子句创建历史数据临时表
+   - **窗口聚合模式**：使用TUMBLE/HOP/SESSION窗口函数
+   - **多阶段计算模式**：通过多个WITH子句进行分步计算
+   - **时间范围过滤**：使用INTERVAL表达式进行时间范围限制
+
+6. **JSON测试数据生成**
    - 仅为源表生成markdown格式的JSON测试数据
    - 基于payload字段结构生成mock数据
    - 包含domain、type、payload结构
    - 生成单条和批量两种格式
    - 输出为.md文件便于复制使用
 </generation_logic>
+
+<complex_scenarios>
+复杂场景处理规则：
+
+1. **时间窗口识别关键词**：
+   - "七天内"、"最近7天"、"过去一周" → INTERVAL '7' DAY
+   - "三十天内"、"最近30天"、"过去一月" → INTERVAL '30' DAY
+   - "一小时内"、"最近1小时" → INTERVAL '1' HOUR
+   - "实时"、"当前"、"当天" → 不使用历史数据，仅当前事件
+
+2. **聚合计算识别关键词**：
+   - "正确率"、"成功率"、"准确率" → SUM(CASE...)/COUNT(*) * 100
+   - "平均"、"均值" → AVG()
+   - "总数"、"数量" → COUNT()
+   - "最大值"、"最高" → MAX()
+   - "最小值"、"最低" → MIN()
+
+3. **复杂场景SQL模板**：
+
+**历史统计场景模板**：
+```sql
+WITH historical_data AS (
+    SELECT 
+        JSON_VALUE(payload, '$.userId') as user_id,
+        JSON_VALUE(payload, '$.fixResult') as fix_result,
+        processing_time
+    FROM BusinessEvent 
+    WHERE domain = '{domain}'
+        AND processing_time >= processing_time - INTERVAL '{time_range}' DAY
+),
+aggregated_stats AS (
+    SELECT 
+        user_id,
+        SUM(CASE WHEN fix_result = '1' THEN 1 ELSE 0 END) as correct_fixes,
+        COUNT(*) as total_fixes
+    FROM historical_data
+    GROUP BY user_id
+)
+SELECT 
+    user_id,
+    CASE 
+        WHEN total_fixes > 0 
+        THEN ROUND(correct_fixes * 100.0 / total_fixes, 2)
+        ELSE 0 
+    END as fix_rate
+FROM aggregated_stats
+```
+
+**窗口聚合场景模板**：
+```sql
+SELECT 
+    JSON_VALUE(payload, '$.userId') as user_id,
+    TUMBLE_START(processing_time, INTERVAL '{window_size}' DAY) as window_start,
+    COUNT(*) as event_count,
+    SUM(CASE WHEN JSON_VALUE(payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) as success_count
+FROM BusinessEvent
+WHERE domain = '{domain}'
+GROUP BY 
+    JSON_VALUE(payload, '$.userId'),
+    TUMBLE(processing_time, INTERVAL '{window_size}' DAY)
+```
+
+4. **智能SQL生成逻辑**：
+   - 分析字段映射中的自然语言描述
+   - 识别时间范围、聚合类型、计算逻辑
+   - 自动选择合适的SQL模板
+   - 自动替换模板中的变量占位符
+   - 生成完整的复杂SQL语句
+
+5. **复杂场景处理示例**：
+
+**示例1：历史正确率统计**
+输入描述：`"获取七天内用户订正的正确率"`
+识别要素：
+- 时间范围：七天内 → INTERVAL '7' DAY
+- 聚合类型：正确率 → SUM(success)/COUNT(*) * 100
+- 需要：历史数据查询 + WITH子句
+
+生成SQL：
+```sql
+history_fix_rate: (
+    SELECT COALESCE(
+        ROUND(
+            SUM(CASE WHEN JSON_VALUE(h.payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 
+            / NULLIF(COUNT(*), 0), 2
+        ), 0
+    )
+    FROM BusinessEvent h 
+    WHERE h.domain = 'wrongbook' 
+        AND JSON_VALUE(h.payload, '$.userId') = JSON_VALUE(be.payload, '$.userId')
+        AND h.processing_time >= be.processing_time - INTERVAL '7' DAY
+        AND h.processing_time <= be.processing_time
+)
+```
+
+**示例2：窗口聚合统计**
+输入描述：`"实时统计最近一小时的学习效率"`
+识别要素：
+- 时间范围：一小时 → INTERVAL '1' HOUR
+- 窗口类型：滑动窗口 → HOP窗口
+- 聚合类型：效率统计
+- 实时特征：需要GROUP BY和窗口函数
+
+**方案A：临时视图方式（推荐）**
+```sql
+-- 创建临时视图
+CREATE TEMPORARY VIEW hourly_efficiency_stats AS
+SELECT 
+    JSON_VALUE(payload, '$.userId') as user_id,
+    HOP_START(processing_time, INTERVAL '10' MINUTE, INTERVAL '1' HOUR) as window_start,
+    COUNT(*) as total_attempts,
+    SUM(CASE WHEN JSON_VALUE(payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) as success_count,
+    CASE 
+        WHEN COUNT(*) > 0 
+        THEN ROUND(SUM(CASE WHEN JSON_VALUE(payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2)
+        ELSE 0 
+    END as efficiency_score
+FROM BusinessEvent
+WHERE domain = 'wrongbook'
+GROUP BY 
+    JSON_VALUE(payload, '$.userId'),
+    HOP(processing_time, INTERVAL '10' MINUTE, INTERVAL '1' HOUR);
+
+-- 在主查询中关联
+LEFT JOIN hourly_efficiency_stats hs 
+    ON hs.user_id = JSON_VALUE(be.payload, '$.userId')
+    AND hs.window_start = (
+        SELECT MAX(window_start) 
+        FROM hourly_efficiency_stats hs2 
+        WHERE hs2.user_id = JSON_VALUE(be.payload, '$.userId')
+    )
+```
+
+**方案B：WITH子句方式**
+```sql
+WITH hourly_stats AS (
+    SELECT 
+        JSON_VALUE(payload, '$.userId') as user_id,
+        HOP_START(processing_time, INTERVAL '10' MINUTE, INTERVAL '1' HOUR) as window_start,
+        COUNT(*) as total_attempts,
+        SUM(CASE WHEN JSON_VALUE(payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) as success_count
+    FROM BusinessEvent
+    WHERE domain = 'wrongbook'
+    GROUP BY 
+        JSON_VALUE(payload, '$.userId'),
+        HOP(processing_time, INTERVAL '10' MINUTE, INTERVAL '1' HOUR)
+)
+-- 然后在主INSERT中使用JOIN关联
+```
+
+**重要提示**：
+- 当字段映射中包含时间窗口关键词（如"七天内"、"最近N天"）时，必须使用历史数据查询
+- 当字段映射中包含聚合关键词（如"正确率"、"成功率"）时，必须使用聚合函数
+- 不要简化复杂指标为简单的CASE表达式，必须根据描述生成相应的复杂SQL
+- 对于包含历史数据的字段，必须使用子查询或WITH子句
+</complex_scenarios>
+
+<critical_instructions>
+**关键指令 - 复杂场景识别**：
+
+1. **强制规则**：如果field_mapping中的描述包含以下关键词，必须按照对应模式生成SQL：
+   - "七天内"、"最近7天" → 必须使用 `INTERVAL '7' DAY` 和历史数据查询
+   - "正确率"、"成功率" → 必须使用 `SUM(CASE...)/COUNT(*) * 100` 聚合计算
+   - "用户" + "历史" → 必须按用户分组查询历史数据
+   - **"实时统计"、"实时计算"** → 必须使用窗口函数 + GROUP BY + 临时视图
+   - **"最近N小时"、"最近N分钟"** → 必须使用HOP窗口函数
+   - **"窗口"、"滑动"、"滚动"** → 必须使用窗口函数，不能用子查询
+
+2. **示例应用**：
+   对于 `history_fix_rate: "获取七天内用户订正的正确率"`，必须生成：
+   ```sql
+   (SELECT COALESCE(
+       ROUND(
+           SUM(CASE WHEN JSON_VALUE(h.payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 
+           / NULLIF(COUNT(*), 0), 2
+       ), 0
+   )
+   FROM BusinessEvent h 
+   WHERE h.domain = 'wrongbook' 
+       AND JSON_VALUE(h.payload, '$.userId') = JSON_VALUE(be.payload, '$.userId')
+       AND h.processing_time >= be.processing_time - INTERVAL '7' DAY
+       AND h.processing_time <= be.processing_time
+   ) as history_fix_rate
+   ```
+
+   对于 `efficiency_score: "实时统计最近一小时的学习效率"`，必须生成：
+   ```sql
+   -- 必须创建临时视图
+   CREATE TEMPORARY VIEW hourly_efficiency_stats AS
+   SELECT 
+       JSON_VALUE(payload, '$.userId') as user_id,
+       HOP_START(processing_time, INTERVAL '10' MINUTE, INTERVAL '1' HOUR) as window_start,
+       ROUND(SUM(CASE WHEN JSON_VALUE(payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as efficiency_score
+   FROM BusinessEvent
+   WHERE domain = 'wrongbook'
+   GROUP BY 
+       JSON_VALUE(payload, '$.userId'),
+       HOP(processing_time, INTERVAL '10' MINUTE, INTERVAL '1' HOUR);
+
+   -- 然后在主INSERT中关联
+   LEFT JOIN hourly_efficiency_stats hs 
+       ON hs.user_id = JSON_VALUE(be.payload, '$.userId')
+   ```
+
+3. **禁止简化**：
+   - 不得将复杂指标简化为简单的CASE表达式
+   - 不得忽略时间窗口要求
+   - 不得忽略历史数据查询需求
+   - **不得将实时统计简化为子查询，必须使用窗口函数和临时视图**
+</critical_instructions>
 
 <output_format>
 生成内容包括：

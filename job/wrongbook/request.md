@@ -122,8 +122,7 @@ field_mapping:
   fix_time: "payload.submitTime"
   
   # 智能指标字段 (基于描述生成SQL)
-  learning_progress_score: "根据用户错题修正的时间间隔和修正成功率，计算学习进度分数，体现学习效果的提升趋势"
-  subject_weakness_analysis: "基于用户在各学科的错题分布和修正情况，识别学科薄弱点并给出改进建议等级"
-  pattern_mastery_index: "分析用户对特定题型的掌握程度，结合题型难度和修正历史，计算掌握度指数"
-  study_efficiency_rating: "综合考虑修正时间、题型难度、学科分布，计算用户的学习效率评级"
+  history_fix_rate: "获取七天内用户订正的正确率"
+  chinese_fix_num: "根据payload.subject,实时统计当天语文科目的订正数量"
+  difficult_fix_rate: "根据payload.result和tower_pattern.difficulty，实时统计用户当天在难度大于2的题目上的答题正确率"
 ```

@@ -1,7 +1,9 @@
 -- 错题本修正记录实时宽表 Flink SQL
 -- 基于 ultra-simple-sql-generator 规则生成
 
+-- ==============================================
 -- 源表定义 (Kafka)
+-- ==============================================
 CREATE TEMPORARY TABLE BusinessEvent (
     domain STRING,
     type STRING,
@@ -18,7 +20,11 @@ CREATE TEMPORARY TABLE BusinessEvent (
     'json.timestamp-format.standard' = 'ISO-8601'
 );
 
--- 维表定义 (MySQL) - tower_pattern
+-- ==============================================
+-- 维表定义 (MySQL)
+-- ==============================================
+
+-- 题型维表
 CREATE TEMPORARY TABLE tower_pattern (
     id STRING NOT NULL,
     name STRING,
@@ -39,7 +45,7 @@ CREATE TEMPORARY TABLE tower_pattern (
     'username' = 'app_rw'
 );
 
--- 维表定义 (MySQL) - tower_teaching_type_pt
+-- 教学类型关联表
 CREATE TEMPORARY TABLE tower_teaching_type_pt (
     id BIGINT NOT NULL,
     teaching_type_id BIGINT,
@@ -60,7 +66,7 @@ CREATE TEMPORARY TABLE tower_teaching_type_pt (
     'username' = 'app_rw'
 );
 
--- 维表定义 (MySQL) - tower_teaching_type
+-- 教学类型表
 CREATE TEMPORARY TABLE tower_teaching_type (
     id BIGINT NOT NULL,
     teaching_type_name STRING,
@@ -81,7 +87,9 @@ CREATE TEMPORARY TABLE tower_teaching_type (
     'username' = 'app_rw'
 );
 
+-- ==============================================
 -- 结果表定义 (MySQL)
+-- ==============================================
 CREATE TEMPORARY TABLE dwd_wrong_record_wide_delta (
     id STRING NOT NULL,
     wrong_id STRING,
@@ -102,6 +110,9 @@ CREATE TEMPORARY TABLE dwd_wrong_record_wide_delta (
     subject_weakness_analysis STRING,
     pattern_mastery_index DECIMAL(10,2),
     study_efficiency_rating STRING,
+    history_fix_rate DECIMAL(5,2),
+    chinese_fix_num INT,
+    difficult_fix_rate DECIMAL(5,2),
     PRIMARY KEY (id) NOT ENFORCED
 ) WITH (
     'connector' = 'mysql',
@@ -113,9 +124,44 @@ CREATE TEMPORARY TABLE dwd_wrong_record_wide_delta (
     'username' = 'app_rw'
 );
 
--- 业务逻辑SQL
+-- ==============================================
+-- 临时视图：实时统计语文科目订正数量
+-- ==============================================
+CREATE TEMPORARY VIEW chinese_fix_stats AS
+SELECT 
+    JSON_VALUE(payload, '$.userId') as user_id,
+    COUNT(*) as chinese_fix_count
+FROM BusinessEvent
+WHERE domain = 'wrongbook'
+    AND JSON_VALUE(payload, '$.subject') = 'CHINESE'
+    AND DATE_FORMAT(processing_time, 'yyyy-MM-dd') = DATE_FORMAT(CURRENT_TIMESTAMP, 'yyyy-MM-dd')
+GROUP BY JSON_VALUE(payload, '$.userId');
+
+-- ==============================================
+-- 临时视图：实时统计难度大于2的题目正确率
+-- ==============================================
+CREATE TEMPORARY VIEW difficult_fix_stats AS
+SELECT 
+    JSON_VALUE(be.payload, '$.userId') as user_id,
+    CASE 
+        WHEN COUNT(*) > 0 
+        THEN ROUND(SUM(CASE WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2)
+        ELSE 0 
+    END as difficult_fix_rate
+FROM BusinessEvent be
+LEFT JOIN tower_pattern tp FOR SYSTEM_TIME AS OF be.processing_time
+    ON tp.id = JSON_VALUE(be.payload, '$.patternId')
+WHERE be.domain = 'wrongbook'
+    AND tp.difficulty > 2.0
+    AND DATE_FORMAT(be.processing_time, 'yyyy-MM-dd') = DATE_FORMAT(CURRENT_TIMESTAMP, 'yyyy-MM-dd')
+GROUP BY JSON_VALUE(be.payload, '$.userId');
+
+-- ==============================================
+-- 主业务逻辑SQL
+-- ==============================================
 INSERT INTO dwd_wrong_record_wide_delta
 SELECT 
+    -- 基础字段映射
     JSON_VALUE(be.payload, '$.fixId') as id,
     JSON_VALUE(be.payload, '$.wrongId') as wrong_id,
     JSON_VALUE(be.payload, '$.userId') as user_id,
@@ -124,9 +170,13 @@ SELECT
     JSON_VALUE(be.payload, '$.patternId') as pattern_id,
     JSON_VALUE(be.payload, '$.fixId') as fix_id,
     CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) as fix_result,
+    
+    -- 维表字段映射
     tp.name as pattern_name,
     tt.id as teaching_type_id,
     tt.teaching_type_name as teaching_type_name,
+    
+    -- 计算字段
     CASE JSON_VALUE(be.payload, '$.subject') 
         WHEN 'ENGLISH' THEN '英语' 
         WHEN 'BIOLOGY' THEN '生物' 
@@ -136,75 +186,113 @@ SELECT
         WHEN 'CHINESE' THEN '语文' 
         ELSE '' 
     END as subject_name,
+    
     CASE JSON_VALUE(be.payload, '$.fixResult') 
         WHEN '1' THEN '订正' 
         WHEN '0' THEN '未订正' 
         ELSE '' 
     END as fix_result_desc,
+    
+    -- 时间字段转换
     CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT) as collect_time,
     CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) as fix_time,
-    -- 学习进度分数：根据修正时间间隔和成功率计算
+    
+    -- 智能指标字段
+    -- 学习进度分数：根据用户错题修正的时间间隔和修正成功率，计算学习进度分数，体现学习效果的提升趋势
     CASE 
-        WHEN CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) = 1 THEN
-            CASE 
-                WHEN (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 300000 THEN 90.0 + (300000 - (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT))) / 10000.0
-                WHEN (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 600000 THEN 70.0 + (600000 - (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT))) / 20000.0
-                ELSE 50.0
-            END
-        ELSE 0.0
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' AND 
+             (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 300000 THEN 
+            90 + ((300000 - (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT))) / 10000)
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' AND 
+             (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 600000 THEN 
+            70 + ((600000 - (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT))) / 20000)
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' THEN 50
+        ELSE 0
     END as learning_progress_score,
-    -- 学科薄弱点分析：基于学科和修正结果给出改进建议等级
-    CASE 
-        WHEN CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) = 1 THEN
-            CASE JSON_VALUE(be.payload, '$.subject')
-                WHEN 'MATH' THEN '数学-已掌握'
-                WHEN 'ENGLISH' THEN '英语-已掌握'
-                WHEN 'PHYSICS' THEN '物理-已掌握'
-                WHEN 'CHEMISTRY' THEN '化学-已掌握'
-                WHEN 'BIOLOGY' THEN '生物-已掌握'
-                WHEN 'CHINESE' THEN '语文-已掌握'
-                ELSE '其他-已掌握'
+    
+    -- 学科薄弱点分析：基于用户在各学科的错题分布和修正情况，识别学科薄弱点并给出改进建议等级
+    CASE JSON_VALUE(be.payload, '$.subject')
+        WHEN 'MATH' THEN 
+            CASE JSON_VALUE(be.payload, '$.fixResult')
+                WHEN '1' THEN '数学-已掌握'
+                ELSE '数学-待提升'
             END
-        ELSE 
-            CASE JSON_VALUE(be.payload, '$.subject')
-                WHEN 'MATH' THEN '数学-待提升'
-                WHEN 'ENGLISH' THEN '英语-待提升'
-                WHEN 'PHYSICS' THEN '物理-待提升'
-                WHEN 'CHEMISTRY' THEN '化学-待提升'
-                WHEN 'BIOLOGY' THEN '生物-待提升'
-                WHEN 'CHINESE' THEN '语文-待提升'
-                ELSE '其他-待提升'
+        WHEN 'ENGLISH' THEN 
+            CASE JSON_VALUE(be.payload, '$.fixResult')
+                WHEN '1' THEN '英语-已掌握'
+                ELSE '英语-待提升'
             END
+        WHEN 'CHINESE' THEN 
+            CASE JSON_VALUE(be.payload, '$.fixResult')
+                WHEN '1' THEN '语文-已掌握'
+                ELSE '语文-待提升'
+            END
+        WHEN 'PHYSICS' THEN 
+            CASE JSON_VALUE(be.payload, '$.fixResult')
+                WHEN '1' THEN '物理-已掌握'
+                ELSE '物理-待提升'
+            END
+        WHEN 'CHEMISTRY' THEN 
+            CASE JSON_VALUE(be.payload, '$.fixResult')
+                WHEN '1' THEN '化学-已掌握'
+                ELSE '化学-待提升'
+            END
+        WHEN 'BIOLOGY' THEN 
+            CASE JSON_VALUE(be.payload, '$.fixResult')
+                WHEN '1' THEN '生物-已掌握'
+                ELSE '生物-待提升'
+            END
+        ELSE '其他-待提升'
     END as subject_weakness_analysis,
-    -- 题型掌握度指数：结合题型难度和修正历史计算
+    
+    -- 题型掌握度指数：分析用户对特定题型的掌握程度，结合题型难度和修正历史，计算掌握度指数
     CASE 
-        WHEN CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) = 1 THEN
-            CASE 
-                WHEN tp.difficulty >= 0.8 THEN 85.0
-                WHEN tp.difficulty >= 0.6 THEN 75.0
-                WHEN tp.difficulty >= 0.4 THEN 65.0
-                ELSE 55.0
-            END
-        ELSE
-            CASE 
-                WHEN tp.difficulty >= 0.8 THEN 15.0
-                WHEN tp.difficulty >= 0.6 THEN 25.0
-                WHEN tp.difficulty >= 0.4 THEN 35.0
-                ELSE 45.0
-            END
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' AND tp.difficulty IS NOT NULL THEN 
+            ROUND((tp.difficulty * 20 + 80), 2)
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' THEN 60.0
+        ELSE 0.0
     END as pattern_mastery_index,
-    -- 学习效率评级：综合考虑修正时间、题型难度、学科分布
+    
+    -- 学习效率评级：综合考虑修正时间、题型难度、学科分布，计算用户的学习效率评级
     CASE 
-        WHEN CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) = 1 AND (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 300000 AND tp.difficulty >= 0.6 THEN '高效学习'
-        WHEN CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) = 1 AND (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 600000 THEN '良好学习'
-        WHEN CAST(JSON_VALUE(be.payload, '$.fixResult') AS INT) = 1 THEN '一般学习'
-        ELSE '需要改进'
-    END as study_efficiency_rating
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' AND 
+             (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 300000 AND 
+             tp.difficulty > 2.0 THEN 'A级-高效'
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' AND 
+             (CAST(JSON_VALUE(be.payload, '$.submitTime') AS BIGINT) - CAST(JSON_VALUE(be.payload, '$.createTime') AS BIGINT)) < 600000 THEN 'B级-良好'
+        WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' THEN 'C级-一般'
+        ELSE 'D级-需改进'
+    END as study_efficiency_rating,
+    
+    -- 历史修正正确率：获取七天内用户订正的正确率
+    (SELECT COALESCE(
+        ROUND(
+            SUM(CASE WHEN JSON_VALUE(h.payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 
+            / NULLIF(COUNT(*), 0), 2
+        ), 0
+    )
+    FROM BusinessEvent h 
+    WHERE h.domain = 'wrongbook' 
+        AND JSON_VALUE(h.payload, '$.userId') = JSON_VALUE(be.payload, '$.userId')
+        AND h.processing_time >= be.processing_time - INTERVAL '7' DAY
+        AND h.processing_time <= be.processing_time
+    ) as history_fix_rate,
+    
+    -- 语文科目订正数量：根据payload.subject,实时统计当天语文科目的订正数量
+    COALESCE(cfs.chinese_fix_count, 0) as chinese_fix_num,
+    
+    -- 难度题目正确率：根据payload.result和tower_pattern.difficulty，实时统计用户当天在难度大于2的题目上的答题正确率
+    COALESCE(dfs.difficult_fix_rate, 0.0) as difficult_fix_rate
+
 FROM BusinessEvent be
-LEFT JOIN tower_pattern FOR SYSTEM_TIME AS OF be.processing_time tp
+LEFT JOIN tower_pattern tp FOR SYSTEM_TIME AS OF be.processing_time
     ON tp.id = JSON_VALUE(be.payload, '$.patternId')
-LEFT JOIN tower_teaching_type_pt FOR SYSTEM_TIME AS OF be.processing_time ttp
+LEFT JOIN tower_teaching_type_pt ttp FOR SYSTEM_TIME AS OF be.processing_time
     ON ttp.pt_id = tp.id AND ttp.is_delete = 0
-LEFT JOIN tower_teaching_type FOR SYSTEM_TIME AS OF be.processing_time tt
+LEFT JOIN tower_teaching_type tt FOR SYSTEM_TIME AS OF be.processing_time
     ON tt.id = ttp.teaching_type_id AND tt.is_delete = 0
+LEFT JOIN chinese_fix_stats cfs
+    ON cfs.user_id = JSON_VALUE(be.payload, '$.userId')
+LEFT JOIN difficult_fix_stats dfs
+    ON dfs.user_id = JSON_VALUE(be.payload, '$.userId')
 WHERE be.domain = 'wrongbook';

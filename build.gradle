@@ -669,7 +669,7 @@ task listRequests {
         } else {
             requestFiles.each { file ->
                 def relativePath = rootProject.relativePath(file)
-                def domainName = file.parentFile.name
+            def domainName = file.parentFile.name
                 println "📁 ${domainName}: ${relativePath}"
             }
             
