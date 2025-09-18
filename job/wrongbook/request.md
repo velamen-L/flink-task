@@ -122,7 +122,19 @@ field_mapping:
   fix_time: "payload.submitTime"
   
   # 智能指标字段 (基于描述生成SQL)
-  history_fix_rate: "获取七天内用户订正的正确率"
-  chinese_fix_num: "根据payload.subject,实时统计当天语文科目的订正数量"
-  difficult_fix_rate: "根据payload.result和tower_pattern.difficulty，实时统计用户当天在难度大于2的题目上的答题正确率"
+  chinese_fix_num: {
+    "description": "语文科目订正数量统计",
+    "time_window": "当天",
+    "dimensions": ["user_id"],
+    "filters": "subject = 'CHINESE'",
+    "aggregation": "COUNT"
+  }
+
+  difficult_fix_rate: {
+    "description": "难度题目正确率",
+    "time_window": "当天", 
+    "dimensions": ["user_id"],
+    "filters": "difficulty > 2.0",
+    "aggregation": "SUM/COUNT*100"
+  }
 ```
