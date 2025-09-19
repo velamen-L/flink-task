@@ -7,20 +7,88 @@
 !theme plain
 skinparam linetype ortho
 
-' 错题本修正记录实时宽表ER图
-title 错题本修正记录实时宽表ER图
+' 一对一学情ER图
+title 一对一学情ER图
 
 ' 源表定义 (Kafka)
-entity "BusinessEvent" as be <<source>> {
+entity "answerSubmittedEvent" as ase <<source>> {
   * domain : string <<业务域>>
   * type : string <<事件类型>>
-  * payload : string <<错题修正载荷JSON>>
+  * user_id : string <<用户id>>
+  * device_id : string <<设备id>>
+  * app_id : string <<应用id>>
+  * payload : string <<事件数据JSON>>
   * event_time : string <<事件时间>>
   --
   table_type: source
-  domain: wrongbook
-  topic: wrongbook-events
-  connector: kafka
+  domain: answer
+  type: answer_submitted
+}
+
+entity "answerSubmittedPayload" as asp <<payload>> {
+  * id : string <<答题主键>>
+  * pattern_id : string <<PT_ID>>
+  * chapter_id : string <<章节ID>>
+  * result : integer <<答题结果(0:错误 1:正确)>>
+  * subject : string <<学科>>
+  * stage : integer <<学段>>
+}
+
+entity "studyTaskFinishedEvent" as stfe <<source>> {
+  * domain : string <<业务域>>
+  * type : string <<事件类型>>
+  * user_id : string <<用户id>>
+  * device_id : string <<设备id>>
+  * app_id : string <<应用id>>
+  * payload : string <<事件数据JSON>>
+  * event_time : string <<事件时间>>
+  --
+  table_type: source
+  domain: study
+  type: study_interactive_task_studied
+}
+
+entity "studyTaskFinishedPayload" as stfp <<payload>> {
+  * subject : string <<学科>>
+  * stage : integer <<学段>>
+  * teaching_type_id : string <<教学类目id>>
+  * teaching_type_name : string <<教学类目名称>>
+  * task_pt_id : string <<互动任务或者PT的ID>>
+  * task_pt_name : string <<互动任务或者PT名称>>
+}
+
+entity "studyPtMasteredEvent" as spme <<source>> {
+  * domain : string <<业务域>>
+  * type : string <<事件类型>>
+  * user_id : string <<用户id>>
+  * device_id : string <<设备id>>
+  * app_id : string <<应用id>>
+  * payload : string <<事件数据JSON>>
+  * event_time : string <<事件时间>>
+  --
+  table_type: source
+  domain: study
+  type: study_pt_mastered
+}
+
+entity "studyPtMasteredPayload" as spmp <<payload>> {
+  * ptId : string <<PT_ID>>
+  * chapterId : string <<章节id>>
+  * masterStatus : string <<掌握度 MASTERED-已掌握 WEAK-薄弱 UNSKILLED-不熟练>>
+  * subject : string <<学科>>
+  * stage : int <<学段>>
+}
+
+entity "guarder_app_time" as time <<source>> {
+  * id : string <<ID>> <<PK>>
+  * statistics_date : string <<统计维度-日期>>
+  * user_id : string <<用户id>>
+  * app_id : string <<应用ID>>
+  * time : int <<时长 秒>>
+  --
+  table_type: source
+  database: guarder
+  connector: mysql-cdc
 }
 
 ' 维表定义 (MySQL)
@@ -33,54 +101,27 @@ entity "tower_pattern" as tp <<dimension>> {
   table_type: dimension
   database: tower
   ttl: 30min
+  connector: mysql
 }
 
-entity "tower_teaching_type_pt" as ttp <<dimension>> {
-  * id : bigint <<关联表ID>> <<PK>>
-  * teaching_type_id : bigint <<教学类型ID>>
-  * pt_id : string <<题型ID>>
-  * is_delete : tinyint <<删除标记>>
-  --
-  table_type: dimension
-  database: tower
-  ttl: 30min
-}
-
-entity "tower_teaching_type" as tt <<dimension>> {
-  * id : bigint <<教学类型ID>> <<PK>>
-  * teaching_type_name : string <<教学类型名称>>
-  * chapter_id : string <<章节ID>>
-  * is_delete : tinyint <<删除标记>>
+entity "tower_chapter" as tc <<dimension>> {
+  * chapter_id : bigint <<关联表ID>> <<PK>>
+  * name : string <<章节名称>>
   --
   table_type: dimension
   database: tower
 }
+
 
 ' 关联关系
-be ||--o{ tp : "payload.patternId = id\n[LEFT JOIN]"
-tp ||--o{ ttp : "id = pt_id\n[LEFT JOIN]\nAND is_delete = 0"
-ttp ||--o{ tt : "teaching_type_id = id\n[LEFT JOIN]\nAND is_delete = 0"
-
-' 注释说明
-note right of be
-  Kafka源表
-  - 自动配置topic: wrongbook-events
-  - 自动过滤: domain = 'wrongbook'
-  - 载荷字段: payload.patternId等
-end note
-
-note right of tp
-  题型维表 (MySQL)
-  - database: tower
-  - ttl: 30min (自定义缓存时间)
-  - FOR SYSTEM_TIME AS OF优化
-end note
-
-note bottom
-  结果表通过字段映射配置定义
-  - 支持指标描述智能生成SQL
-  - 自动推断结果表结构
-end note
+asp ||--o{ ase
+stfp ||--o{ stfe
+spmp ||--o{ spme
+spme ||--o{ tp : "payload.pt_id = id"
+stfe ||--o{ tp : "payload.task_pt_id = id"
+ase ||--o{ tc : "payload.pattern_id = id"
+spme ||--o{ tc : "payload.chapter_id = id"
+ase ||--o{ tc : "payload.chapter_id = chapter_id"
 
 @enduml
 ```
@@ -90,51 +131,43 @@ end note
 ```yaml
 # 结果表配置
 result_table:
-  table_name: "dwd_wrong_record_wide_delta"
+  table_name: "dws_study_pt_stats_delta"
   table_type: "result"
   connector: "mysql"
   database: "guarder"
-  primary_key: ["id"]
+  primary_key: ["user_id,current_day,subject,pt_id"]
 
 # 字段映射配置
 field_mapping:
   # 基础字段映射
-  id: "payload.fixId"
-  wrong_id: "payload.wrongId"
-  user_id: "payload.userId"
-  subject: "payload.subject"
-  question_id: "payload.questionId"
-  pattern_id: "payload.patternId"
-  fix_id: "payload.fixId"
-  fix_result: "payload.fixResult"
-  
-  # 维表字段映射
-  pattern_name: "tower_pattern.name"
-  teaching_type_id: "tower_teaching_type.id"
-  teaching_type_name: "tower_teaching_type.teaching_type_name"
-  
-  # 计算字段
-  subject_name: "CASE payload.subject WHEN 'ENGLISH' THEN '英语' WHEN 'BIOLOGY' THEN '生物' WHEN 'MATH' THEN '数学' WHEN 'PHYSICS' THEN '物理' WHEN 'CHEMISTRY' THEN '化学' WHEN 'CHINESE' THEN '语文' ELSE '' END"
-  fix_result_desc: "CASE payload.fixResult WHEN 1 THEN '订正' WHEN 0 THEN '未订正' ELSE '' END"
-  
-  # 时间字段转换
-  collect_time: "payload.createTime"
-  fix_time: "payload.submitTime"
-  
-  # 智能指标字段 (基于描述生成SQL)
-  chinese_fix_num: {
-    "description": "语文科目订正数量统计",
+  current_day: "ase.statistics_date"
+  user_id: "ase.userId"
+  subject: "ase.payload.subject"
+  pt_id: "ase.payload.pattern_id"
+  pt_name: "tp.name"
+  master_status: : {
+    "description": "当天用户pt的最新掌握度",
     "time_window": "当天",
-    "dimensions": ["user_id"],
-    "filters": "subject = 'CHINESE'",
-    "aggregation": "COUNT"
+    "dimensions": ["spme.user_id","spme.statistics_date","spme.payload.subject","spme.payload.pattern_id"],
+    "filters": "如果已存在的状态为MASTERED，则不更新掌握度字段",
+    "aggregation": "最新的一条记录的masterStatus"
   }
+  difficulty: "tp.difficulty"
+  answer_cnt: {
+    "description": "当天用户pt下的答题数量统计",
+    "time_window": "当天",
+    "dimensions": ["ase.user_id","ase.statistics_date","ase.payload.subject","ase.payload.pattern_id"],
+    "filters": "",
+    "aggregation": "COUNT(DISTINCT ase.id)"
+  }
+  answer_right_cnt: {
+    "description": "当天用户的答对数量统计",
+    "time_window": "当天",
+    "dimensions": ["ase.user_id","ase.statistics_date","ase.payload.subject","ase.payload.pattern_id"],
+    "filters": "ase.result = 1",
+    "aggregation": "COUNT(DISTINCT ase.id)"
+  }
+  chapter_id: "ase.payload.chapter_id"
+  chapter_name: "tc.name"
 
-  difficult_fix_rate: {
-    "description": "难度题目正确率",
-    "time_window": "当天", 
-    "dimensions": ["user_id"],
-    "filters": "difficulty > 2.0",
-    "aggregation": "SUM/COUNT*100"
-  }
 ```
