@@ -192,21 +192,21 @@ field_mapping:
   answer_right_cnt: {
     "description": "当天用户的答对数量统计",
     "time_window": "当天",
-    "dimensions": ["ase.user_id","ase.statistics_date","ase.payload.subject","ase.payload.id"],
+    "dimensions": ["ase.user_id","ase.statistics_date","ase.payload.subject"],
     "filters": "ase.result = 1",
     "aggregation": "COUNT"
   }
   master_pt_cnt: {
     "description": "当天用户的掌握pt数量统计",
     "time_window": "当天",
-    "dimensions": ["spme.user_id","spme.statistics_date","spme.payload.subject","spme.payload.ptId"],
+    "dimensions": ["spme.user_id","spme.statistics_date","spme.payload.subject"],
     "filters": "spme.payload.masterStatus = 'MASTERED'",
     "aggregation": "COUNT"
   }
   study_task_count: {
     "description": "当天用户的互动任务数量统计",
     "time_window": "当天",
-    "dimensions": ["stfe.user_id","stfe.statistics_date","stfe.payload.subject","stfe.payload.task_pt_id"],
+    "dimensions": ["stfe.user_id","stfe.statistics_date","stfe.payload.subject"],
     "filters": "stfe.payload.subject in ('chinese','english')",
     "aggregation": "COUNT"              
   }
@@ -214,7 +214,7 @@ field_mapping:
   study_task_knowledge_explain_count: {
     "description": "当天用户的互动任务的知识点讲解数量统计",
     "time_window": "当天",
-    "dimensions": ["stfe.user_id","stfe.statistics_date","stfe.payload.subject","stfe.payload.task_pt_id"],
+    "dimensions": ["stfe.user_id","stfe.statistics_date","stfe.payload.subject"],
     "filters": "stfe.payload.subject not in ('chinese','english') and stfe.payload.teaching_type_name = '知识点讲解'",
     "aggregation": "COUNT"
   }
@@ -222,7 +222,7 @@ field_mapping:
   study_task_example_explain_count: {
     "description": "当天用户的互动任务的例题讲解数量统计",
     "time_window": "当天",
-    "dimensions": ["stfe.user_id","stfe.statistics_date","stfe.payload.subject","stfe.payload.task_pt_id"],
+    "dimensions": ["stfe.user_id","stfe.statistics_date","stfe.payload.subject"],
     "filters": "stfe.payload.subject not in ('chinese','english') and stfe.payload.teaching_type_name = '例题讲解'",
     "aggregation": "COUNT"
   }

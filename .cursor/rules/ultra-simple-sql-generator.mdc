@@ -350,9 +350,12 @@ difficult_fix_rate: {
 - "statisticDate" → 按日期统计
 
 ### **过滤条件识别**：
+- **基础过滤** → `domain = 'XXX' AND type = 'XXX'` (必须同时过滤domain和type)
 - "语文"、"CHINESE" → `JSON_VALUE(payload, '$.subject') = 'CHINESE'`
 - "难度大于N" → `difficulty > N`
 - "修正成功" → `JSON_VALUE(payload, '$.fixResult') = '1'`
+- "答题结果正确" → `JSON_VALUE(payload, '$.result') = '1'`
+- "掌握状态" → `JSON_VALUE(payload, '$.masterStatus') = 'MASTERED'`
 
 ### **聚合类型识别**：
 - "数量"、"COUNT" → `COUNT(*)`
@@ -362,6 +365,12 @@ difficult_fix_rate: {
 
 ## 3. 强制规则
 
+### **基础过滤规则（必须遵守）**：
+- **所有源表查询** → 必须同时过滤 `domain = 'XXX' AND type = 'XXX'`
+- **从ER图读取** → domain和type值必须从entity配置中获取
+- **不得省略** → 任何源表查询都不能只过滤domain而省略type
+
+### **关键词触发规则**：
 如果field_mapping中的描述包含以下关键词，必须按照对应模式生成SQL：
    - "七天内"、"最近7天" → 必须使用 `INTERVAL '7' DAY` 和历史数据查询
    - "正确率"、"成功率" → 必须使用 `SUM(CASE...)/COUNT(*) * 100` 聚合计算
@@ -370,6 +379,11 @@ difficult_fix_rate: {
    - **"最近N小时"、"最近N分钟"** → 必须使用HOP窗口函数
    - **"窗口"、"滑动"、"滚动"** → 必须使用窗口函数，不能用子查询
    - **"当天"、"今日"** → 必须使用日期过滤条件
+
+### **固定映射表规则**：
+- **应用映射** → 使用临时视图 `CREATE TEMPORARY VIEW app_subject_mapping AS SELECT * FROM (VALUES...) AS t(app_id, subject)`
+- **状态映射** → 使用临时视图定义固定的状态码到描述的映射
+- **分类映射** → 使用临时视图定义业务分类映射关系
 
 2. **示例应用**：
    对于 `history_fix_rate: "获取七天内用户订正的正确率"`，必须生成：
@@ -391,53 +405,122 @@ difficult_fix_rate: {
 ## 4. 复杂指标模板生成规则
 
 ### **模板A：当天统计类指标**
-输入示例：`chinese_fix_num: "根据payload.subject,实时统计当天语文科目的订正数量"`
+输入示例：`answer_cnt: "当天答题数量统计"`
 
 **解析结果**：
 - time_window: "当天"
-- dimensions: ["user_id"]  
-- filters: "subject = 'CHINESE'"
-- aggregation: "COUNT"
+- dimensions: ["user_id", "subject"]  
+- source: "answerSubmittedEvent"
+- domain: "answer", type: "answer_submitted"
+- aggregation: "COUNT(DISTINCT)"
 
 **生成SQL模板**：
 ```sql
-CREATE TEMPORARY VIEW {field_name}_stats AS
+-- 当天答题数量统计视图
+CREATE TEMPORARY VIEW answer_cnt_stats AS
 SELECT 
-    JSON_VALUE(payload, '$.userId') as user_id,
-    COUNT(*) as {field_name}
-FROM BusinessEvent
-WHERE domain = 'wrongbook'
-    AND JSON_VALUE(payload, '$.subject') = 'CHINESE'
+    user_id,
+    DATE_FORMAT(processing_time, 'yyyy-MM-dd') as statistics_date,
+    JSON_VALUE(payload, '$.subject') as subject,
+    COUNT(DISTINCT JSON_VALUE(payload, '$.id')) as answer_cnt
+FROM answerSubmittedEvent
+WHERE domain = 'answer' and type = 'answer_submitted'
     AND DATE_FORMAT(processing_time, 'yyyy-MM-dd') = DATE_FORMAT(CURRENT_TIMESTAMP, 'yyyy-MM-dd')
-GROUP BY JSON_VALUE(payload, '$.userId');
+GROUP BY user_id, DATE_FORMAT(processing_time, 'yyyy-MM-dd'), JSON_VALUE(payload, '$.subject');
 ```
 
-### **模板B：当天正确率类指标**
-输入示例：`difficult_fix_rate: "根据payload.result和tower_pattern.difficulty，实时统计用户当天在难度大于2的题目上的答题正确率"`
+### **模板B：当天条件过滤统计指标**
+输入示例：`answer_right_cnt: "当天答对数量统计"`
 
 **解析结果**：
 - time_window: "当天"
-- dimensions: ["user_id"]
-- filters: "difficulty > 2.0"
-- aggregation: "SUM/COUNT*100"
+- dimensions: ["user_id", "subject"]
+- source: "answerSubmittedEvent"
+- domain: "answer", type: "answer_submitted"
+- filters: "result = '1'"
+- aggregation: "COUNT(DISTINCT)"
 
 **生成SQL模板**：
 ```sql
-CREATE TEMPORARY VIEW {field_name}_stats AS
+-- 当天答对数量统计视图
+CREATE TEMPORARY VIEW answer_right_cnt_stats AS
 SELECT 
-    JSON_VALUE(be.payload, '$.userId') as user_id,
-    CASE 
-        WHEN COUNT(*) > 0 
-        THEN ROUND(SUM(CASE WHEN JSON_VALUE(be.payload, '$.fixResult') = '1' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2)
-        ELSE 0 
-    END as {field_name}
-FROM BusinessEvent be
-LEFT JOIN tower_pattern tp FOR SYSTEM_TIME AS OF be.processing_time
-    ON tp.id = JSON_VALUE(be.payload, '$.patternId')
-WHERE be.domain = 'wrongbook'
-    AND tp.difficulty > 2.0
-    AND DATE_FORMAT(be.processing_time, 'yyyy-MM-dd') = DATE_FORMAT(CURRENT_TIMESTAMP, 'yyyy-MM-dd')
-GROUP BY JSON_VALUE(be.payload, '$.userId');
+    user_id,
+    DATE_FORMAT(processing_time, 'yyyy-MM-dd') as statistics_date,
+    JSON_VALUE(payload, '$.subject') as subject,
+    COUNT(DISTINCT JSON_VALUE(payload, '$.id')) as answer_right_cnt
+FROM answerSubmittedEvent
+WHERE domain = 'answer' and type = 'answer_submitted'
+    AND JSON_VALUE(payload, '$.result') = '1'
+    AND DATE_FORMAT(processing_time, 'yyyy-MM-dd') = DATE_FORMAT(CURRENT_TIMESTAMP, 'yyyy-MM-dd')
+GROUP BY user_id, DATE_FORMAT(processing_time, 'yyyy-MM-dd'), JSON_VALUE(payload, '$.subject');
+```
+
+### **模板C：多条件过滤统计指标**
+输入示例：`study_task_knowledge_explain_count: "当天知识点讲解数量统计"`
+
+**解析结果**：
+- time_window: "当天"
+- dimensions: ["user_id", "subject"]
+- source: "studyTaskFinishedEvent"
+- domain: "study", type: "study_interactive_task_studied"
+- filters: "subject NOT IN ('chinese', 'english') AND teaching_type_name = '知识点讲解'"
+- aggregation: "COUNT(DISTINCT)"
+
+**生成SQL模板**：
+```sql
+-- 当天知识点讲解数量统计视图
+CREATE TEMPORARY VIEW study_task_knowledge_explain_count_stats AS
+SELECT 
+    user_id,
+    DATE_FORMAT(processing_time, 'yyyy-MM-dd') as statistics_date,
+    JSON_VALUE(payload, '$.subject') as subject,
+    COUNT(DISTINCT JSON_VALUE(payload, '$.task_pt_id')) as study_task_knowledge_explain_count
+FROM studyTaskFinishedEvent
+WHERE domain = 'study' and type = 'study_interactive_task_studied'
+    AND JSON_VALUE(payload, '$.subject') NOT IN ('chinese', 'english')
+    AND JSON_VALUE(payload, '$.teaching_type_name') = '知识点讲解'
+    AND DATE_FORMAT(processing_time, 'yyyy-MM-dd') = DATE_FORMAT(CURRENT_TIMESTAMP, 'yyyy-MM-dd')
+GROUP BY user_id, DATE_FORMAT(processing_time, 'yyyy-MM-dd'), JSON_VALUE(payload, '$.subject');
+```
+
+### **模板D：固定映射表关联统计**
+输入示例：`study_time: "应用时长统计（按学科分组）"`
+
+**解析结果**：
+- source: "guarder_app_time" (外部数据源)
+- mapping: "app_subject_mapping"
+- dimensions: ["user_id", "subject", "statistics_date"]
+- aggregation: "SUM"
+
+**生成SQL模板**：
+```sql
+-- 应用ID到学科映射维表
+CREATE TEMPORARY VIEW app_subject_mapping AS
+SELECT *
+FROM (
+    VALUES
+        ('com.jzx.client.math1v1', 'math'),
+        ('com.jzx.client.math', 'math'),
+        ('com.jzx.client.chinese', 'chinese'),
+        ('com.jzx.client.english', 'english'),
+        ('com.jzx.client.physics', 'physics'),
+        ('com.jzx.client.chemistry', 'chemistry'),
+        ('com.jzx.client.biology', 'biology')
+) AS t(app_id, subject);
+
+-- 应用时长统计视图 (先转换为学科)
+CREATE TEMPORARY VIEW study_time_stats AS
+SELECT 
+    gat.statistics_date,
+    gat.user_id,
+    asm.subject,
+    SUM(gat.`time`) as study_time
+FROM guarder_app_time gat
+LEFT JOIN app_subject_mapping asm
+    ON asm.app_id = gat.app_id
+WHERE asm.subject IS NOT NULL
+GROUP BY gat.statistics_date, gat.user_id, asm.subject;
 ```
 
 ### **模板C：滑动窗口类指标**
@@ -584,7 +667,7 @@ CREATE TEMPORARY TABLE dim_table (
     'hostname' = '${从env配置读取}',
     'lookup.cache.max-rows' = '${从entity或env配置读取}',
     'lookup.cache.strategy' = 'LRU',
-    'lookup.cache.ttl' = '${优先entity配置ttl，否则使用env默认值}',
+    'lookup.cache.ttl' = '${优先entity配置ttl，否则使用env默认值如30min}',
     'lookup.max-retries' = '${从env配置读取}',
     'password' = '${从env配置读取}',
     'port' = '${从env配置读取}',
